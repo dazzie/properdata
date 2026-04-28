@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+.turbo/
+dist/
+out/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# IDE
+.vscode/
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+
+# Sentry
+.sentryclirc
+
+# Vercel
+.vercel/
+
+# Database (local development with docker-compose)
+postgres-data/
+
+# Generated files
+packages/db/migrations/meta/_journal.json.local
+
+# Misc
+.cache/
+*.pem
+.eslintcache

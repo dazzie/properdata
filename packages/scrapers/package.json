@@ -1,0 +1,22 @@
+{
+  "name": "@properdata/scrapers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@properdata/agents": "workspace:*",
+    "@properdata/db": "workspace:*",
+    "@properdata/shared": "workspace:*",
+    "iconv-lite": "^0.6.3",
+    "papaparse": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.3.15",
+    "typescript": "^5.6.2"
+  }
+}
