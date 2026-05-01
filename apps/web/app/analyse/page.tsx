@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, type FormEvent } from 'react';
+import { useState, useCallback, useRef, useEffect, type FormEvent } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types mirroring the API response
@@ -122,6 +122,21 @@ interface AnalyseResponse {
   };
 }
 
+interface SearchResult {
+  id: number;
+  sale_date: string;
+  price: string;
+  address_raw: string;
+  address_normalised: string | null;
+  county: string;
+  eircode: string | null;
+  property_type: string | null;
+  is_new: boolean;
+  description: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -192,7 +207,8 @@ const PRESETS: Array<{
 // Helpers
 // ---------------------------------------------------------------------------
 
-function eur(n: number): string {
+function eur(n: number | null | undefined): string {
+  if (n == null) return '—';
   return '€' + n.toLocaleString('en-IE', { maximumFractionDigits: 0 });
 }
 
@@ -245,7 +261,135 @@ export default function AnalysePage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyseResponse | null>(null);
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
   const set = (key: string, val: string) => setForm((f) => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSearch = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.length < 3) {
+      setSearchResults([]);
+      setSearchOpen(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ address_search: q, limit: '10' });
+        const res = await fetch(`/api/property/search?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.rows ?? []);
+          setSearchOpen(true);
+        }
+      } catch {
+        // silently fail search
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  const nominatimSearch = useCallback(async (q: string) => {
+    const params = new URLSearchParams({ q, format: 'json', limit: '1', countrycodes: 'ie' });
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { 'User-Agent': 'ProperData/1.0' },
+    });
+    if (res.ok) {
+      const results = await res.json();
+      if (results.length > 0) {
+        return { lat: String(results[0].lat), lng: String(results[0].lon) };
+      }
+    }
+    return null;
+  }, []);
+
+  const geocodeAddress = useCallback(async (address: string, county: string) => {
+    try {
+      // 1. Try full address
+      const full = await nominatimSearch(`${address}, ${county}, Ireland`);
+      if (full) return full;
+
+      // 2. Strip house number, try estate/road + town + county
+      const stripped = address.replace(/^\d+\s*/, '');
+      if (stripped !== address) {
+        const estate = await nominatimSearch(`${stripped}, ${county}, Ireland`);
+        if (estate) return estate;
+      }
+
+      // 3. Extract town from address (last part before Co./County) and search town + county
+      const parts = address.split(',').map((s) => s.trim());
+      if (parts.length >= 2) {
+        const town = parts.find((p) => !p.match(/^\d/) && !p.match(/^Co\.?\s/i));
+        if (town) {
+          const townResult = await nominatimSearch(`${town}, ${county}, Ireland`);
+          if (townResult) return townResult;
+        }
+      }
+
+      // 4. Last resort: just the county
+      const countyResult = await nominatimSearch(`${county}, Ireland`);
+      if (countyResult) return countyResult;
+    } catch {
+      // geocoding is best-effort
+    }
+    return null;
+  }, [nominatimSearch]);
+
+  const selectProperty = useCallback(async (p: SearchResult) => {
+    setSearchQuery(p.address_normalised ?? p.address_raw);
+    setSearchOpen(false);
+    setResult(null);
+    setError(null);
+
+    let lat = p.lat != null ? String(p.lat) : '';
+    let lng = p.lng != null ? String(p.lng) : '';
+
+    setForm({
+      address: p.address_normalised ?? p.address_raw,
+      county: p.county || 'Westmeath',
+      propertyType: p.property_type ?? 'unknown',
+      bedrooms: '',
+      purchasePrice: String(Math.round(Number(p.price))),
+      berRating: '',
+      yearBuilt: '',
+      lat,
+      lng,
+      buyerType: 'former_owner_occupier',
+      intendedUse: 'owner_occupier',
+    });
+
+    if (!lat || !lng) {
+      setGeocoding(true);
+      const geo = await geocodeAddress(
+        p.address_normalised ?? p.address_raw,
+        p.county,
+      );
+      setGeocoding(false);
+      if (geo) {
+        lat = geo.lat;
+        lng = geo.lng;
+        setForm((f) => ({ ...f, lat, lng }));
+      }
+    }
+  }, [geocodeAddress]);
 
   const applyPreset = (preset: (typeof PRESETS)[number]) => {
     setForm({
@@ -332,6 +476,46 @@ export default function AnalysePage() {
         ))}
       </div>
 
+      {/* Property search */}
+      <div ref={searchRef} style={S.searchWrap}>
+        <label style={S.field}>
+          <span style={S.label}>Search PPR sales to auto-fill</span>
+          <div style={S.searchInputWrap}>
+            <input
+              style={S.searchInput}
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Type an address, e.g. Rathgowan Mullingar..."
+            />
+            {searching && <span style={S.searchSpinner} />}
+          </div>
+        </label>
+        {searchOpen && searchResults.length > 0 && (
+          <div style={S.dropdown}>
+            {searchResults.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                style={S.dropdownItem}
+                onClick={() => selectProperty(r)}
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <span style={S.dropdownAddress}>{r.address_normalised ?? r.address_raw}</span>
+                <span style={S.dropdownMeta}>
+                  {eur(Number(r.price))} &middot; {r.county} &middot; {r.sale_date}
+                  {r.property_type && r.property_type !== 'unknown' ? ` · ${r.property_type.replace('_', '-')}` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {searchOpen && searchResults.length === 0 && !searching && (
+          <div style={S.dropdown}>
+            <div style={S.dropdownEmpty}>No matching sales found</div>
+          </div>
+        )}
+      </div>
+
       {/* Form */}
       <form onSubmit={submit} style={S.form}>
         <div style={S.grid}>
@@ -390,8 +574,13 @@ export default function AnalysePage() {
           </label>
         </div>
 
-        <details style={S.locationDetails}>
-          <summary style={S.locationSummary}>Location coordinates (enables radon, solar, walkability)</summary>
+        <details style={S.locationDetails} open={!!(form.lat && form.lng)}>
+          <summary style={S.locationSummary}>
+            Location coordinates (enables radon, solar, walkability)
+            {geocoding && <span style={S.geocodingBadge}>geocoding...</span>}
+            {!geocoding && form.lat && form.lng && <span style={S.coordsBadge}>coordinates set</span>}
+            {!geocoding && !form.lat && !form.lng && <span style={S.noCoordsHint}>no coordinates — enrichments will be skipped</span>}
+          </summary>
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
             <label style={{ ...S.field, flex: 1 }}>
               <span style={S.label}>Latitude</span>
@@ -692,6 +881,33 @@ const S: Record<string, React.CSSProperties> = {
   h1: { fontSize: '2rem', fontWeight: 700, margin: '0.5rem 0 0.25rem' },
   subtitle: { fontSize: '0.95rem', color: '#666', margin: 0 },
 
+  searchWrap: { position: 'relative' as const, marginBottom: '1rem' },
+  searchInputWrap: { position: 'relative' as const },
+  searchInput: {
+    width: '100%', padding: '0.75rem 1rem', fontSize: '1rem', border: '2px solid #1D9E75',
+    borderRadius: '10px', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const,
+    background: '#fff',
+  },
+  searchSpinner: {
+    position: 'absolute' as const, right: 12, top: '50%', transform: 'translateY(-50%)',
+    width: 18, height: 18, border: '2px solid #e5e5e5', borderTopColor: '#1D9E75',
+    borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+  },
+  dropdown: {
+    position: 'absolute' as const, top: '100%', left: 0, right: 0, zIndex: 50,
+    background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', marginTop: '4px', maxHeight: 360,
+    overflowY: 'auto' as const,
+  },
+  dropdownItem: {
+    display: 'flex', flexDirection: 'column' as const, width: '100%', textAlign: 'left' as const,
+    padding: '0.75rem 1rem', border: 'none', borderBottom: '1px solid #f0f0f0',
+    background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  dropdownAddress: { fontSize: '0.9rem', fontWeight: 600, color: '#1a1a1a' },
+  dropdownMeta: { fontSize: '0.78rem', color: '#888', marginTop: '2px' },
+  dropdownEmpty: { padding: '1rem', fontSize: '0.85rem', color: '#999', textAlign: 'center' as const },
+
   presets: { display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' as const },
   presetsLabel: { fontSize: '0.8rem', color: '#999', fontWeight: 500 },
   presetBtn: {
@@ -719,7 +935,18 @@ const S: Record<string, React.CSSProperties> = {
     borderRadius: '6px', fontFamily: 'inherit', outline: 'none', background: '#fff',
   },
   locationDetails: { marginTop: '0.75rem' },
-  locationSummary: { fontSize: '0.8rem', color: '#1D9E75', cursor: 'pointer', fontWeight: 500 },
+  locationSummary: { fontSize: '0.8rem', color: '#1D9E75', cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' as const },
+  geocodingBadge: {
+    fontSize: '0.7rem', color: '#d97706', background: '#fffbeb', padding: '1px 8px',
+    borderRadius: '4px', fontWeight: 600, animation: 'spin 1.5s linear infinite',
+  },
+  coordsBadge: {
+    fontSize: '0.7rem', color: '#16a34a', background: '#f0fdf4', padding: '1px 8px',
+    borderRadius: '4px', fontWeight: 600,
+  },
+  noCoordsHint: {
+    fontSize: '0.7rem', color: '#dc2626', fontWeight: 500,
+  },
   submit: {
     marginTop: '1rem', padding: '0.75rem 2rem', fontSize: '1rem', fontWeight: 600,
     color: '#fff', background: '#1D9E75', border: 'none', borderRadius: '8px',

@@ -65,7 +65,9 @@ export async function GET(request: NextRequest) {
 
   const query = `
     SELECT id, sale_date, price, address_raw, address_normalised, county, eircode,
-           property_type, is_new, description
+           property_type, is_new, description,
+           ST_Y(location::geometry) AS lat,
+           ST_X(location::geometry) AS lng
     FROM sales
     ${where}
     ORDER BY sale_date DESC
