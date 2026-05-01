@@ -615,248 +615,398 @@ export default function AnalysePage() {
         </div>
       )}
 
-      {/* Results */}
+      {/* Results — Decision Cards */}
       {result && (
         <div style={S.results}>
           {/* Metadata bar */}
           <div style={S.meta}>
             {result.metadata.from_cache && <span style={S.cacheBadge}>cached</span>}
             <span>{result.metadata.elapsedMs.toLocaleString()}ms</span>
-            <span>{result.metadata.agentCalls} AI agent calls</span>
-            <span>~${result.metadata.estimatedCost.toFixed(3)} cost</span>
+            <span>{result.metadata.agentCalls} AI agents</span>
+            <span>~${result.metadata.estimatedCost.toFixed(3)}</span>
           </div>
 
-          {/* Enrichment cards */}
-          <div style={S.cardGrid}>
-            {/* Walkability */}
-            {result.walkability && (
-              <div style={S.card}>
-                <div style={S.cardHeader}>
-                  <span style={S.cardIcon}>🚶</span>
-                  <span style={S.cardTitle}>Walkability</span>
-                </div>
-                <div style={{ ...S.bigNumber, color: walkabilityColor(result.walkability.score) }}>
-                  {result.walkability.score}<span style={S.bigUnit}>/100</span>
-                </div>
-                <div style={S.cardLabel}>{result.walkability.label}</div>
-                <div style={S.amenityGrid}>
-                  {result.walkability.amenities
-                    .filter((a) => a.count > 0)
-                    .map((a) => (
-                      <div key={a.category} style={S.amenityRow}>
-                        <span style={S.amenityName}>{a.category}</span>
-                        <span style={S.amenityVal}>
-                          {a.count}{a.nearest ? ` (${a.nearest}m)` : ''}
-                        </span>
-                      </div>
-                    ))}
-                </div>
+          {/* Executive summary strip */}
+          <div style={S.execSummary}>
+            <div style={S.execItem}>
+              <span style={S.execLabel}>Fair Value</span>
+              <span style={S.execValue}>{eur(result.comparable.fair_value_central)}</span>
+              <span style={S.execSub}>{result.comparable.confidence} confidence</span>
+            </div>
+            <div style={S.execItem}>
+              <span style={S.execLabel}>Grant Upside</span>
+              <span style={{ ...S.execValue, color: '#16a34a' }}>{eur(result.grants.total_grants_high)}</span>
+              <span style={S.execSub}>{result.grants.applicable_schemes?.length ?? 0} schemes</span>
+            </div>
+            {result.grants.net_acquisition_cost && (
+              <div style={S.execItem}>
+                <span style={S.execLabel}>Effective Cost</span>
+                <span style={S.execValue}>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
+                <span style={S.execSub}>after grants + fees</span>
               </div>
             )}
-
-            {/* Radon */}
-            {result.radon && (
-              <div style={S.card}>
-                <div style={S.cardHeader}>
-                  <span style={S.cardIcon}>☢️</span>
-                  <span style={S.cardTitle}>Radon Risk</span>
-                </div>
-                <div style={{ ...S.bigNumber, color: riskColor(result.radon.riskCategory) }}>
-                  {result.radon.riskPercent}%
-                </div>
-                <div style={{ ...S.cardLabel, color: riskColor(result.radon.riskCategory) }}>
-                  {result.radon.riskCategory.toUpperCase()} RISK
-                </div>
-                <p style={S.cardText}>{result.radon.riskDescription}</p>
-                <p style={S.cardMuted}>{result.radon.context}</p>
-                <div style={S.cardFooter}>
-                  <span>Test: {result.radon.testCost}</span>
-                  <span>Fix: {result.radon.remediationCost}</span>
-                </div>
+            {result.yield && (
+              <div style={S.execItem}>
+                <span style={S.execLabel}>Net Yield</span>
+                <span style={{ ...S.execValue, color: '#1D9E75' }}>{result.yield.yields.net_yield_annual}%</span>
+                <span style={S.execSub}>{result.yield.yields.tax_adjusted_yield}% after tax</span>
               </div>
             )}
+          </div>
 
-            {/* Solar */}
-            {result.solar && (
-              <div style={S.card}>
-                <div style={S.cardHeader}>
-                  <span style={S.cardIcon}>☀️</span>
-                  <span style={S.cardTitle}>Solar Potential</span>
-                </div>
-                <div style={{ ...S.bigNumber, color: '#d97706' }}>
-                  {result.solar.annualYieldKwh.toLocaleString()}<span style={S.bigUnit}> kWh/yr</span>
-                </div>
-                <div style={S.cardLabel}>{result.solar.yieldPerKwp} kWh/kWp ({result.solar.systemSizeKwp}kWp system)</div>
+          {/* Decision Cards */}
+          <div style={S.decisionGrid}>
 
-                <div style={S.solarGrid}>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>System cost</span>
-                    <span style={S.solarVal}>{eur(result.solar.financial.systemCostEstimate)}</span>
-                  </div>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>SEAI grant</span>
-                    <span style={{ ...S.solarVal, color: '#16a34a' }}>-{eur(result.solar.financial.seaiGrant)}</span>
-                  </div>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>Net cost</span>
-                    <span style={S.solarVal}>{eur(result.solar.financial.netCost)}</span>
-                  </div>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>Annual savings</span>
-                    <span style={{ ...S.solarVal, color: '#16a34a' }}>{eur(result.solar.financial.annualSavings)}/yr</span>
-                  </div>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>Payback</span>
-                    <span style={S.solarVal}>{result.solar.financial.paybackYears} years</span>
-                  </div>
-                  <div style={S.solarItem}>
-                    <span style={S.solarLabel}>25-year savings</span>
-                    <span style={{ ...S.solarVal, color: '#16a34a', fontWeight: 700 }}>{eur(result.solar.financial.lifetimeSavings25yr)}</span>
+            {/* 1. Valuation */}
+            <div style={S.dCard}>
+              <div style={S.dCardHead}>
+                <div style={S.dCardIcon}>1</div>
+                <div>
+                  <div style={S.dCardTitle}>Valuation</div>
+                  <div style={S.dCardHeadline}>
+                    {eur(result.comparable.fair_value_low)} – {eur(result.comparable.fair_value_high)}
                   </div>
                 </div>
+                <div style={{ ...S.confidenceBadge, background: result.comparable.confidence === 'high' ? '#dcfce7' : result.comparable.confidence === 'medium' ? '#fef9c3' : '#fee2e2', color: result.comparable.confidence === 'high' ? '#166534' : result.comparable.confidence === 'medium' ? '#854d0e' : '#991b1b' }}>
+                  {result.comparable.confidence}
+                </div>
+              </div>
+              <div style={S.dCardBody}>
+                <div style={S.valBar}>
+                  <span style={S.valBarEnd}>{eur(result.comparable.fair_value_low)}</span>
+                  <div style={S.valBarFill}>
+                    <div style={S.valBarCenter}>{eur(result.comparable.fair_value_central)}</div>
+                  </div>
+                  <span style={S.valBarEnd}>{eur(result.comparable.fair_value_high)}</span>
+                </div>
+              </div>
+              <details style={S.expandable}>
+                <summary style={S.expandSummary}>View {result.comparable.comparables_used?.length ?? 0} comparables and analysis</summary>
+                <div style={S.expandContent}>
+                  {result.comparable.comparables_used?.length > 0 && (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={S.table}>
+                        <thead>
+                          <tr>
+                            <th style={S.th}>Address</th>
+                            <th style={S.th}>Date</th>
+                            <th style={S.th}>Price</th>
+                            <th style={S.th}>Dist.</th>
+                            <th style={S.th}>Weight</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.comparable.comparables_used.map((c, i) => (
+                            <tr key={i} style={S.tr}>
+                              <td style={S.td}>{c.address}</td>
+                              <td style={S.td}>{c.sale_date}</td>
+                              <td style={{ ...S.td, fontWeight: 600 }}>{eur(c.price)}</td>
+                              <td style={S.td}>{c.distance_meters != null ? `${c.distance_meters.toLocaleString()}m` : '—'}</td>
+                              <td style={S.td}>{c.weight}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p style={S.narrative}>{result.comparable.narrative}</p>
+                </div>
+              </details>
+            </div>
 
-                {result.solar.monthlyBreakdown.length > 0 && (
-                  <div style={S.chartWrap}>
-                    <div style={S.barChart}>
-                      {result.solar.monthlyBreakdown.map((m) => {
-                        const max = Math.max(...result.solar!.monthlyBreakdown.map((b) => b.yieldKwh));
-                        const pct = max > 0 ? (m.yieldKwh / max) * 100 : 0;
-                        return (
-                          <div key={m.month} style={S.barCol}>
-                            <div style={{ ...S.bar, height: `${pct}%` }} title={`${m.yieldKwh} kWh`} />
-                            <span style={S.barLabel}>{MONTH_NAMES[m.month - 1]}</span>
-                          </div>
-                        );
-                      })}
+            {/* 2. Grant Opportunity */}
+            <div style={S.dCard}>
+              <div style={S.dCardHead}>
+                <div style={S.dCardIcon}>2</div>
+                <div>
+                  <div style={S.dCardTitle}>Grant Opportunity</div>
+                  <div style={{ ...S.dCardHeadline, color: '#16a34a' }}>
+                    {eur(result.grants.total_grants_low)} – {eur(result.grants.total_grants_high)}
+                  </div>
+                </div>
+                <div style={{ ...S.confidenceBadge, background: '#dcfce7', color: '#166534' }}>
+                  {result.grants.applicable_schemes?.length ?? 0} schemes
+                </div>
+              </div>
+              <div style={S.dCardBody}>
+                {result.grants.net_acquisition_cost && (
+                  <div style={S.effectiveCost}>
+                    <div style={S.costRow}>
+                      <span>Purchase price</span><span>{eur(result.grants.net_acquisition_cost.purchase_price)}</span>
+                    </div>
+                    <div style={S.costRow}>
+                      <span>Stamp duty + legal</span><span>{eur((result.grants.net_acquisition_cost.stamp_duty ?? 0) + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 0))}</span>
+                    </div>
+                    <div style={{ ...S.costRow, color: '#16a34a' }}>
+                      <span>Grants (est.)</span><span>-{eur(result.grants.net_acquisition_cost.total_grants_central)}</span>
+                    </div>
+                    <div style={{ ...S.costRow, fontWeight: 700, borderTop: '2px solid #e5e5e5', paddingTop: '0.375rem', marginTop: '0.25rem' }}>
+                      <span>Effective cost</span><span>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
                     </div>
                   </div>
                 )}
               </div>
-            )}
+              <details style={S.expandable}>
+                <summary style={S.expandSummary}>View grant-by-grant breakdown</summary>
+                <div style={S.expandContent}>
+                  {result.grants.applicable_schemes?.map((s) => (
+                    <div key={s.code} style={S.schemeCard}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={S.schemeName}>{s.name}</span>
+                        <span style={S.schemeAmount}>{eur(s.amount_low)}{s.amount_high !== s.amount_low ? ` – ${eur(s.amount_high)}` : ''}</span>
+                      </div>
+                      <div style={S.schemeStatus}>{s.eligibility_status}</div>
+                      <p style={S.schemeRationale}>{s.rationale}</p>
+                      {s.conditions?.length > 0 && (
+                        <ul style={S.conditionList}>
+                          {s.conditions.map((cond, ci) => <li key={ci} style={S.conditionItem}>{cond}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                  <p style={S.narrative}>{result.grants.narrative}</p>
+                </div>
+              </details>
+            </div>
 
-            {/* DCB / Mica */}
-            {result.dcb && (
-              <div style={S.card}>
-                <div style={S.cardHeader}>
-                  <span style={S.cardIcon}>🧱</span>
-                  <span style={S.cardTitle}>Defective Blocks (Mica)</span>
-                </div>
-                <div style={{ ...S.bigNumber, color: riskColor(result.dcb.riskLevel) }}>
-                  {result.dcb.riskLevel.toUpperCase()}
-                </div>
-                <p style={S.cardText}>{result.dcb.context}</p>
-                <p style={S.cardMuted}>{result.dcb.recommendation}</p>
-                {result.dcb.grantEligible && result.dcb.grantDetails && (
-                  <div style={{ ...S.cardFooter, flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <span style={{ color: '#16a34a', fontWeight: 600 }}>Grant eligible</span>
-                    <span style={{ fontSize: '0.75rem', color: '#666' }}>{result.dcb.grantDetails}</span>
+            {/* 3. Risk Flags */}
+            {(result.radon || result.dcb) && (
+              <div style={S.dCard}>
+                <div style={S.dCardHead}>
+                  <div style={S.dCardIcon}>3</div>
+                  <div>
+                    <div style={S.dCardTitle}>Risk Flags</div>
+                    <div style={S.dCardHeadline}>
+                      {[
+                        result.radon ? `Radon: ${result.radon.riskCategory}` : null,
+                        result.dcb ? `DCB: ${result.dcb.riskLevel}` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
-                )}
+                  {(() => {
+                    const worst = result.radon?.riskCategory === 'high' || result.dcb?.riskLevel === 'high' ? 'high'
+                      : result.radon?.riskCategory === 'medium' || result.dcb?.riskLevel === 'medium' ? 'medium' : 'low';
+                    return (
+                      <div style={{ ...S.confidenceBadge, background: worst === 'high' ? '#fee2e2' : worst === 'medium' ? '#fef9c3' : '#dcfce7', color: worst === 'high' ? '#991b1b' : worst === 'medium' ? '#854d0e' : '#166534' }}>
+                        {worst} risk
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div style={S.dCardBody}>
+                  <div style={S.riskGrid}>
+                    {result.radon && (
+                      <div style={S.riskItem}>
+                        <div style={{ ...S.riskBadge, background: riskColor(result.radon.riskCategory) }}>{result.radon.riskPercent}%</div>
+                        <div>
+                          <div style={S.riskName}>Radon</div>
+                          <div style={S.riskSub}>{result.radon.riskCategory} risk</div>
+                        </div>
+                      </div>
+                    )}
+                    {result.dcb && (
+                      <div style={S.riskItem}>
+                        <div style={{ ...S.riskBadge, background: riskColor(result.dcb.riskLevel) }}>{result.dcb.riskLevel.charAt(0).toUpperCase()}</div>
+                        <div>
+                          <div style={S.riskName}>Defective Blocks</div>
+                          <div style={S.riskSub}>{result.dcb.isAffectedCounty ? 'Affected county' : 'Not in affected area'}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <details style={S.expandable}>
+                  <summary style={S.expandSummary}>View risk detail and remediation</summary>
+                  <div style={S.expandContent}>
+                    {result.radon && (
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Radon</div>
+                        <p style={S.cardText}>{result.radon.riskDescription}</p>
+                        <p style={S.cardMuted}>{result.radon.context}</p>
+                        <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#555', marginTop: '0.5rem' }}>
+                          <span>Test cost: {result.radon.testCost}</span>
+                          <span>Remediation: {result.radon.remediationCost}</span>
+                        </div>
+                      </div>
+                    )}
+                    {result.dcb && (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Defective Concrete Blocks</div>
+                        <p style={S.cardText}>{result.dcb.context}</p>
+                        <p style={S.cardMuted}>{result.dcb.recommendation}</p>
+                        {result.dcb.grantEligible && result.dcb.grantDetails && (
+                          <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#f0fdf4', borderRadius: '6px', fontSize: '0.8rem' }}>
+                            <span style={{ color: '#16a34a', fontWeight: 600 }}>Grant eligible: </span>
+                            <span style={{ color: '#555' }}>{result.dcb.grantDetails}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </details>
               </div>
             )}
-          </div>
 
-          {/* Comparable valuation */}
-          <div style={S.section}>
-            <h2 style={S.sectionTitle}>Comparable Valuation</h2>
-            <div style={S.valuationBar}>
-              <div style={S.valRange}>
-                <span style={S.valEndpoint}>{eur(result.comparable.fair_value_low)}</span>
-                <div style={S.valCentral}>
-                  <span style={S.valCentralLabel}>Fair value</span>
-                  <span style={S.valCentralNum}>{eur(result.comparable.fair_value_central)}</span>
+            {/* 4. Retrofit / Solar */}
+            {result.solar && (
+              <div style={S.dCard}>
+                <div style={S.dCardHead}>
+                  <div style={S.dCardIcon}>4</div>
+                  <div>
+                    <div style={S.dCardTitle}>Retrofit & Solar</div>
+                    <div style={S.dCardHeadline}>
+                      {result.solar.annualYieldKwh.toLocaleString()} kWh/yr
+                    </div>
+                  </div>
+                  <div style={{ ...S.confidenceBadge, background: '#fef9c3', color: '#854d0e' }}>
+                    {result.solar.financial.paybackYears}yr payback
+                  </div>
                 </div>
-                <span style={S.valEndpoint}>{eur(result.comparable.fair_value_high)}</span>
-              </div>
-              <span style={S.confidence}>Confidence: {result.comparable.confidence}</span>
-            </div>
-            <p style={S.narrative}>{result.comparable.narrative}</p>
-
-            {result.comparable.comparables_used.length > 0 && (
-              <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
-                <table style={S.table}>
-                  <thead>
-                    <tr>
-                      <th style={S.th}>Address</th>
-                      <th style={S.th}>Date</th>
-                      <th style={S.th}>Price</th>
-                      <th style={S.th}>Distance</th>
-                      <th style={S.th}>Weight</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.comparable.comparables_used.map((c, i) => (
-                      <tr key={i} style={S.tr}>
-                        <td style={S.td}>{c.address}</td>
-                        <td style={S.td}>{c.sale_date}</td>
-                        <td style={{ ...S.td, fontWeight: 600 }}>{eur(c.price)}</td>
-                        <td style={S.td}>{c.distance_meters != null ? `${c.distance_meters.toLocaleString()}m` : '—'}</td>
-                        <td style={S.td}>{c.weight}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div style={S.dCardBody}>
+                  <div style={S.solarSummaryGrid}>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>System</span>
+                      <span style={S.solarSummaryVal}>{result.solar.systemSizeKwp}kWp</span>
+                    </div>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>Cost</span>
+                      <span style={S.solarSummaryVal}>{eur(result.solar.financial.systemCostEstimate)}</span>
+                    </div>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>SEAI Grant</span>
+                      <span style={{ ...S.solarSummaryVal, color: '#16a34a' }}>-{eur(result.solar.financial.seaiGrant)}</span>
+                    </div>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>Net Cost</span>
+                      <span style={{ ...S.solarSummaryVal, fontWeight: 700 }}>{eur(result.solar.financial.netCost)}</span>
+                    </div>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>Annual Saving</span>
+                      <span style={{ ...S.solarSummaryVal, color: '#16a34a' }}>{eur(result.solar.financial.annualSavings)}</span>
+                    </div>
+                    <div style={S.solarSummaryItem}>
+                      <span style={S.solarSummaryLabel}>25yr Return</span>
+                      <span style={{ ...S.solarSummaryVal, color: '#16a34a', fontWeight: 700 }}>{eur(result.solar.financial.lifetimeSavings25yr)}</span>
+                    </div>
+                  </div>
+                </div>
+                <details style={S.expandable}>
+                  <summary style={S.expandSummary}>View monthly generation profile</summary>
+                  <div style={S.expandContent}>
+                    {result.solar.monthlyBreakdown.length > 0 && (
+                      <div style={S.chartWrap}>
+                        <div style={S.barChart}>
+                          {result.solar.monthlyBreakdown.map((m) => {
+                            const max = Math.max(...result.solar!.monthlyBreakdown.map((b) => b.yieldKwh));
+                            const pct = max > 0 ? (m.yieldKwh / max) * 100 : 0;
+                            return (
+                              <div key={m.month} style={S.barCol}>
+                                <div style={S.barValue}>{m.yieldKwh}</div>
+                                <div style={{ ...S.bar, height: `${pct}%` }} title={`${m.yieldKwh} kWh`} />
+                                <span style={S.barLabel}>{MONTH_NAMES[m.month - 1]}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <p style={S.cardMuted}>{result.solar.context}</p>
+                  </div>
+                </details>
               </div>
             )}
-          </div>
 
-          {/* Grants */}
-          <div style={S.section}>
-            <h2 style={S.sectionTitle}>Grant Eligibility</h2>
-            <div style={S.grantSummary}>
-              <div>
-                <span style={S.grantRange}>{eur(result.grants.total_grants_low)} – {eur(result.grants.total_grants_high)}</span>
-                <span style={S.grantLabel}> potential grants</span>
-              </div>
-              {result.grants.net_acquisition_cost && (
-                <div style={S.grantCost}>
-                  Effective cost: <strong>{eur(result.grants.net_acquisition_cost.effective_cost)}</strong>
+            {/* 5. Location & Walkability */}
+            {result.walkability && (
+              <div style={S.dCard}>
+                <div style={S.dCardHead}>
+                  <div style={S.dCardIcon}>5</div>
+                  <div>
+                    <div style={S.dCardTitle}>Location & Walkability</div>
+                    <div style={S.dCardHeadline}>
+                      {result.walkability.score}/100 — {result.walkability.label}
+                    </div>
+                  </div>
+                  <div style={{ ...S.walkScore, color: walkabilityColor(result.walkability.score) }}>
+                    {result.walkability.score}
+                  </div>
                 </div>
-              )}
-            </div>
-            {result.grants.applicable_schemes.map((s) => (
-              <div key={s.code} style={S.schemeCard}>
-                <div style={S.schemeName}>{s.name}</div>
-                <div style={S.schemeAmount}>{eur(s.amount_low)}{s.amount_high !== s.amount_low ? ` – ${eur(s.amount_high)}` : ''}</div>
-                <div style={S.schemeStatus}>{s.eligibility_status}</div>
-                <p style={S.schemeRationale}>{s.rationale}</p>
+                <div style={S.dCardBody}>
+                  <p style={S.cardText}>{result.walkability.summary}</p>
+                </div>
+                <details style={S.expandable}>
+                  <summary style={S.expandSummary}>View amenity breakdown</summary>
+                  <div style={S.expandContent}>
+                    <div style={S.amenityGrid}>
+                      {result.walkability.amenities
+                        .filter((a) => a.count > 0)
+                        .map((a) => (
+                          <div key={a.category} style={S.amenityRow}>
+                            <span style={S.amenityName}>{a.category}</span>
+                            <span style={S.amenityVal}>
+                              {a.count}{a.nearest ? ` (${a.nearest}m)` : ''}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                    <p style={S.cardMuted}>{result.walkability.context}</p>
+                  </div>
+                </details>
               </div>
-            ))}
-            <p style={S.narrative}>{result.grants.narrative}</p>
-          </div>
+            )}
 
-          {/* Yield (if present) */}
-          {result.yield && (
-            <div style={S.section}>
-              <h2 style={S.sectionTitle}>Rental Yield Analysis</h2>
-              <div style={S.yieldGrid}>
-                <div style={S.yieldCard}>
-                  <span style={S.yieldNum}>{result.yield.yields.gross_yield_annual}%</span>
-                  <span style={S.yieldLabel}>Gross yield</span>
+            {/* 6. Rental Yield (conditional) */}
+            {result.yield && (
+              <div style={S.dCard}>
+                <div style={S.dCardHead}>
+                  <div style={S.dCardIcon}>6</div>
+                  <div>
+                    <div style={S.dCardTitle}>Rental Yield</div>
+                    <div style={S.dCardHeadline}>
+                      {result.yield.yields.net_yield_annual}% net · {eur(result.yield.property.estimated_rent_monthly)}/mo
+                    </div>
+                  </div>
                 </div>
-                <div style={S.yieldCard}>
-                  <span style={S.yieldNum}>{result.yield.yields.net_yield_annual}%</span>
-                  <span style={S.yieldLabel}>Net yield</span>
+                <div style={S.dCardBody}>
+                  <div style={S.yieldGrid}>
+                    <div style={S.yieldCard}>
+                      <span style={S.yieldNum}>{result.yield.yields.gross_yield_annual}%</span>
+                      <span style={S.yieldLabel}>Gross</span>
+                    </div>
+                    <div style={S.yieldCard}>
+                      <span style={S.yieldNum}>{result.yield.yields.net_yield_annual}%</span>
+                      <span style={S.yieldLabel}>Net</span>
+                    </div>
+                    <div style={S.yieldCard}>
+                      <span style={S.yieldNum}>{result.yield.yields.tax_adjusted_yield}%</span>
+                      <span style={S.yieldLabel}>After tax</span>
+                    </div>
+                    <div style={S.yieldCard}>
+                      <span style={S.yieldNum}>{eur(result.yield.property.estimated_rent_monthly)}</span>
+                      <span style={S.yieldLabel}>Monthly rent</span>
+                    </div>
+                  </div>
+                  <p style={{ ...S.cardMuted, fontSize: '0.72rem', marginTop: '0.25rem' }}>
+                    Source: {result.yield.property.rent_data_source}
+                  </p>
                 </div>
-                <div style={S.yieldCard}>
-                  <span style={S.yieldNum}>{result.yield.yields.tax_adjusted_yield}%</span>
-                  <span style={S.yieldLabel}>After tax</span>
-                </div>
-                <div style={S.yieldCard}>
-                  <span style={S.yieldNum}>{eur(result.yield.property.estimated_rent_monthly)}</span>
-                  <span style={S.yieldLabel}>Est. monthly rent</span>
-                </div>
+                <details style={S.expandable}>
+                  <summary style={S.expandSummary}>View yield analysis and assumptions</summary>
+                  <div style={S.expandContent}>
+                    <p style={S.narrative}>{result.yield.narrative}</p>
+                  </div>
+                </details>
               </div>
-              <p style={S.narrative}>{result.yield.narrative}</p>
-            </div>
-          )}
+            )}
+
+          </div>
 
           {/* Disclaimer */}
           <div style={S.disclaimer}>
-            This analysis is generated by AI using verified public data sources and is provided for informational
-            purposes only. It does not constitute financial, legal, or property advice. Grant eligibility is
-            determined by the relevant scheme administrator. Consult a qualified professional before making
-            property decisions.
+            This analysis is generated by AI using verified public data sources (PPR, RTB, SEAI, EPA, OSM).
+            It does not constitute financial, legal, or property advice. Grant eligibility is determined by
+            the relevant scheme administrator. Comparable valuations reflect market data, not recommendations.
+            Consult a qualified professional before making property decisions.
           </div>
         </div>
       )}
@@ -975,108 +1125,150 @@ const S: Record<string, React.CSSProperties> = {
   results: {},
   meta: {
     display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#999',
-    padding: '0.5rem 0', marginBottom: '1rem', borderBottom: '1px solid #eee', flexWrap: 'wrap' as const,
+    padding: '0.5rem 0', marginBottom: '0.75rem', borderBottom: '1px solid #eee', flexWrap: 'wrap' as const,
   },
   cacheBadge: {
     background: '#dbeafe', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px',
     fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase' as const,
   },
 
-  // Enrichment cards
-  cardGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: '1rem', marginBottom: '2rem',
+  // Executive summary strip
+  execSummary: {
+    display: 'flex', gap: '1px', background: '#e5e5e5', borderRadius: '12px',
+    overflow: 'hidden', marginBottom: '1.25rem',
   },
-  card: {
+  execItem: {
+    flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
+    padding: '1rem 0.5rem', background: '#fff', minWidth: 0,
+  },
+  execLabel: { fontSize: '0.65rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.04em' },
+  execValue: { fontSize: '1.35rem', fontWeight: 800, color: '#1a1a1a', marginTop: '0.125rem' },
+  execSub: { fontSize: '0.7rem', color: '#aaa', marginTop: '0.125rem' },
+
+  // Decision cards
+  decisionGrid: { display: 'flex', flexDirection: 'column' as const, gap: '0.75rem' },
+  dCard: {
     background: '#fff', border: '1px solid #e5e5e5', borderRadius: '10px',
-    padding: '1.25rem', display: 'flex', flexDirection: 'column' as const,
+    overflow: 'hidden',
   },
-  cardHeader: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' },
-  cardIcon: { fontSize: '1.25rem' },
-  cardTitle: { fontSize: '0.9rem', fontWeight: 700, color: '#333' },
-  bigNumber: { fontSize: '2.5rem', fontWeight: 800, lineHeight: 1 },
-  bigUnit: { fontSize: '1rem', fontWeight: 500 },
-  cardLabel: { fontSize: '0.8rem', fontWeight: 600, color: '#666', marginBottom: '0.5rem', textTransform: 'uppercase' as const },
-  cardText: { fontSize: '0.82rem', color: '#444', lineHeight: 1.5, margin: '0.25rem 0' },
-  cardMuted: { fontSize: '0.78rem', color: '#888', lineHeight: 1.5, margin: '0.25rem 0', flex: 1 },
-  cardFooter: {
-    display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#666',
-    borderTop: '1px solid #f0f0f0', marginTop: '0.75rem', paddingTop: '0.5rem',
+  dCardHead: {
+    display: 'flex', alignItems: 'center', gap: '0.75rem',
+    padding: '1rem 1.25rem', borderBottom: '1px solid #f0f0f0',
   },
+  dCardIcon: {
+    width: 28, height: 28, borderRadius: '50%', background: '#1D9E75', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '0.75rem', fontWeight: 700, flexShrink: 0,
+  },
+  dCardTitle: { fontSize: '0.72rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.04em' },
+  dCardHeadline: { fontSize: '1.1rem', fontWeight: 700, color: '#1a1a1a' },
+  confidenceBadge: {
+    marginLeft: 'auto', padding: '0.25rem 0.625rem', borderRadius: '20px',
+    fontSize: '0.7rem', fontWeight: 600, whiteSpace: 'nowrap' as const, flexShrink: 0,
+  },
+  dCardBody: { padding: '0.75rem 1.25rem' },
 
-  amenityGrid: { marginTop: '0.5rem' },
-  amenityRow: {
-    display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0',
-    fontSize: '0.78rem', borderBottom: '1px solid #f5f5f5',
+  // Expandable detail
+  expandable: { borderTop: '1px solid #f0f0f0' },
+  expandSummary: {
+    padding: '0.625rem 1.25rem', fontSize: '0.78rem', fontWeight: 600, color: '#1D9E75',
+    cursor: 'pointer', listStyle: 'none' as const,
   },
-  amenityName: { color: '#555' },
-  amenityVal: { fontWeight: 600, color: '#333', fontVariantNumeric: 'tabular-nums' },
+  expandContent: { padding: '0 1.25rem 1rem' },
 
-  solarGrid: {
-    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem',
-    margin: '0.75rem 0',
+  // Valuation bar
+  valBar: {
+    display: 'flex', alignItems: 'center', gap: '0.5rem',
+    background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px',
+    padding: '0.5rem 0.75rem',
   },
-  solarItem: { display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', padding: '0.2rem 0' },
-  solarLabel: { color: '#666' },
-  solarVal: { fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
+  valBarEnd: { fontSize: '0.82rem', color: '#666', fontWeight: 500, whiteSpace: 'nowrap' as const },
+  valBarFill: { flex: 1, height: 6, background: 'linear-gradient(90deg, #bbf7d0, #16a34a)', borderRadius: 3, position: 'relative' as const, display: 'flex', justifyContent: 'center' },
+  valBarCenter: { position: 'absolute' as const, top: -20, fontSize: '0.85rem', fontWeight: 800, color: '#15803d' },
 
-  chartWrap: { marginTop: '0.5rem', borderTop: '1px solid #f0f0f0', paddingTop: '0.5rem' },
-  barChart: { display: 'flex', gap: '2px', height: 60, alignItems: 'flex-end' },
+  // Effective cost breakdown
+  effectiveCost: { fontSize: '0.85rem' },
+  costRow: { display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0', color: '#444' },
+
+  // Risk flags
+  riskGrid: { display: 'flex', gap: '1.5rem', flexWrap: 'wrap' as const },
+  riskItem: { display: 'flex', alignItems: 'center', gap: '0.625rem' },
+  riskBadge: {
+    width: 36, height: 36, borderRadius: '50%', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '0.85rem', fontWeight: 700, flexShrink: 0,
+  },
+  riskName: { fontSize: '0.85rem', fontWeight: 600, color: '#333' },
+  riskSub: { fontSize: '0.75rem', color: '#888' },
+
+  // Solar summary grid
+  solarSummaryGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem',
+  },
+  solarSummaryItem: {
+    display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
+    padding: '0.5rem', background: '#fafafa', borderRadius: '6px',
+  },
+  solarSummaryLabel: { fontSize: '0.65rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' as const },
+  solarSummaryVal: { fontSize: '0.95rem', fontWeight: 700, color: '#333', fontVariantNumeric: 'tabular-nums' },
+
+  // Walk score circle
+  walkScore: { marginLeft: 'auto', fontSize: '1.75rem', fontWeight: 800, flexShrink: 0 },
+
+  // Chart
+  chartWrap: { marginBottom: '0.5rem' },
+  barChart: { display: 'flex', gap: '3px', height: 80, alignItems: 'flex-end' },
   barCol: { flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', height: '100%', justifyContent: 'flex-end' },
   bar: { width: '100%', background: '#fbbf24', borderRadius: '2px 2px 0 0', minHeight: 2 },
-  barLabel: { fontSize: '0.55rem', color: '#999', marginTop: '2px' },
+  barValue: { fontSize: '0.55rem', color: '#666', marginBottom: '2px' },
+  barLabel: { fontSize: '0.6rem', color: '#999', marginTop: '3px' },
 
-  // Sections
-  section: {
-    background: '#fff', border: '1px solid #e5e5e5', borderRadius: '10px',
-    padding: '1.25rem', marginBottom: '1rem',
-  },
-  sectionTitle: { fontSize: '1.1rem', fontWeight: 700, margin: '0 0 0.75rem' },
+  // Shared
+  cardText: { fontSize: '0.82rem', color: '#444', lineHeight: 1.5, margin: '0.25rem 0' },
+  cardMuted: { fontSize: '0.78rem', color: '#888', lineHeight: 1.5, margin: '0.25rem 0' },
   narrative: { fontSize: '0.85rem', color: '#555', lineHeight: 1.6, margin: '0.5rem 0 0' },
 
-  valuationBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' as const, gap: '0.5rem' },
-  valRange: {
-    display: 'flex', alignItems: 'center', gap: '1rem',
-    background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px',
-    padding: '0.75rem 1rem',
-  },
-  valEndpoint: { fontSize: '0.9rem', color: '#555', fontWeight: 500 },
-  valCentral: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center' },
-  valCentralLabel: { fontSize: '0.65rem', color: '#16a34a', fontWeight: 600, textTransform: 'uppercase' as const },
-  valCentralNum: { fontSize: '1.5rem', fontWeight: 800, color: '#15803d' },
-  confidence: { fontSize: '0.8rem', color: '#888' },
-
-  grantSummary: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap' as const, marginBottom: '0.75rem' },
-  grantRange: { fontSize: '1.25rem', fontWeight: 700, color: '#16a34a' },
-  grantLabel: { fontSize: '0.9rem', color: '#555' },
-  grantCost: { fontSize: '0.85rem', color: '#555' },
+  // Grant schemes
   schemeCard: {
     background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px',
     padding: '0.75rem', marginBottom: '0.5rem',
   },
   schemeName: { fontWeight: 600, fontSize: '0.85rem' },
-  schemeAmount: { fontSize: '1rem', fontWeight: 700, color: '#16a34a' },
-  schemeStatus: { fontSize: '0.7rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase' as const },
+  schemeAmount: { fontSize: '0.95rem', fontWeight: 700, color: '#16a34a' },
+  schemeStatus: { fontSize: '0.65rem', color: '#d97706', fontWeight: 600, textTransform: 'uppercase' as const, marginTop: '0.125rem' },
   schemeRationale: { fontSize: '0.78rem', color: '#666', margin: '0.25rem 0 0' },
+  conditionList: { margin: '0.375rem 0 0', paddingLeft: '1.25rem' },
+  conditionItem: { fontSize: '0.75rem', color: '#666', lineHeight: 1.5 },
 
-  yieldGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '0.75rem' },
+  // Amenities
+  amenityGrid: {},
+  amenityRow: {
+    display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0',
+    fontSize: '0.8rem', borderBottom: '1px solid #f5f5f5',
+  },
+  amenityName: { color: '#555' },
+  amenityVal: { fontWeight: 600, color: '#333', fontVariantNumeric: 'tabular-nums' },
+
+  // Yield
+  yieldGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' },
   yieldCard: {
     display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
-    background: '#f9fafb', borderRadius: '8px', padding: '0.75rem',
+    background: '#f9fafb', borderRadius: '8px', padding: '0.625rem',
   },
-  yieldNum: { fontSize: '1.5rem', fontWeight: 800, color: '#1D9E75' },
-  yieldLabel: { fontSize: '0.7rem', color: '#888', fontWeight: 500, textTransform: 'uppercase' as const, textAlign: 'center' as const },
+  yieldNum: { fontSize: '1.35rem', fontWeight: 800, color: '#1D9E75' },
+  yieldLabel: { fontSize: '0.65rem', color: '#888', fontWeight: 500, textTransform: 'uppercase' as const, textAlign: 'center' as const },
 
-  table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '0.82rem' },
+  // Table
+  table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '0.8rem' },
   th: {
-    textAlign: 'left' as const, padding: '0.5rem 0.625rem', borderBottom: '2px solid #e5e5e5',
-    fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase' as const, color: '#888',
+    textAlign: 'left' as const, padding: '0.5rem 0.5rem', borderBottom: '2px solid #e5e5e5',
+    fontWeight: 600, fontSize: '0.68rem', textTransform: 'uppercase' as const, color: '#888',
   },
   tr: { borderBottom: '1px solid #f0f0f0' },
-  td: { padding: '0.4rem 0.625rem', verticalAlign: 'top' as const },
+  td: { padding: '0.375rem 0.5rem', verticalAlign: 'top' as const },
 
   disclaimer: {
-    fontSize: '0.72rem', color: '#999', lineHeight: 1.6, marginTop: '1.5rem',
+    fontSize: '0.72rem', color: '#999', lineHeight: 1.6, marginTop: '1.25rem',
     padding: '1rem', background: '#fafafa', borderRadius: '8px', border: '1px solid #eee',
   },
 };
