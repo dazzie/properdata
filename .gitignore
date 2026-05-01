@@ -50,3 +50,4 @@ packages/db/migrations/meta/_journal.json.local
 .cache/
 *.pem
 .eslintcache
+.vercel

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "properdata": {
+      "command": "/Users/daraghmoran/code/personal-projects/properdata/properdata/node_modules/.pnpm/node_modules/.bin/tsx",
+      "args": [
+        "packages/mcp/src/server.ts"
+      ],
+      "cwd": "/Users/daraghmoran/code/personal-projects/properdata/properdata",
+      "env": {}
+    }
+  }
+}

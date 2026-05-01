@@ -1,47 +1,52 @@
 /**
- * One-time backfill of historical PPR data.
+ * Two-phase PPR backfill.
  *
- * Run with: pnpm tsx scripts/backfill-ppr.ts
+ * Phase 1 (raw insert): Inserts all PPR rows without AI normalisation. Fast (~5 min).
+ * Phase 2 (normalise):  Normalises un-normalised rows in batches. Rate-limited by API.
  *
- * This is a long-running operation (20-40 minutes for the full ~777K records
- * as of April 2026). DO NOT run from the Vercel cron — Vercel has a 300s max
- * function duration even on Pro plan, and this will exceed it.
+ * Run Phase 1:
+ *   export $(grep -v '^#' .env.local | grep '=' | xargs)
+ *   NODE_OPTIONS='--conditions react-server' pnpm tsx scripts/backfill-ppr.ts
  *
- * Run from a local machine with a stable connection. The operation is
- * idempotent (deduplication on ppr_uid) so it can be re-run safely.
+ * Run Phase 2 (normalise N rows, default 100):
+ *   export $(grep -v '^#' .env.local | grep '=' | xargs)
+ *   NODE_OPTIONS='--conditions react-server' pnpm tsx scripts/backfill-ppr.ts --normalise [N]
  *
- * Sprint 1 — Task 1.9
- *
- * Before running:
- * - Verify DATABASE_URL points to the intended environment (probably staging first)
- * - Verify ANTHROPIC_API_KEY is set (normalisation calls)
- * - Estimate AI cost: ~$0.001 per row × 777K rows = ~$8 in Haiku calls
- * - Be on a stable network — interruptions mean re-fetching the full PPR CSV
+ * Both phases are idempotent and can be re-run safely.
  */
 
-import { ingestPpr } from '../packages/scrapers/src/ppr';
+import { ingestPpr, normalisePendingSales } from '../packages/scrapers/src/ppr';
+
+const isNormalise = process.argv.includes('--normalise');
 
 async function main() {
-  console.log('Starting PPR backfill...');
-  console.log('This may take 20-40 minutes. Do not interrupt.\n');
+  if (isNormalise) {
+    const limitArg = process.argv[process.argv.indexOf('--normalise') + 1];
+    const limit = limitArg ? parseInt(limitArg, 10) : 100;
+    console.log(`Phase 2: Normalising up to ${limit} pending sales...\n`);
+
+    const start = Date.now();
+    const result = await normalisePendingSales(limit);
+    const elapsed = Math.round((Date.now() - start) / 1000);
+
+    console.log(`\nNormalisation complete in ${elapsed}s`);
+    console.log(`  Processed: ${result.processed}`);
+    console.log(`  Errors: ${result.errors}`);
+    return;
+  }
+
+  console.log('Phase 1: Inserting all PPR rows (raw, no AI normalisation)...\n');
 
   const start = Date.now();
   const result = await ingestPpr();
   const elapsed = Math.round((Date.now() - start) / 1000);
 
-  console.log(`\n✓ Backfill complete in ${elapsed}s`);
+  console.log(`\nPhase 1 complete in ${elapsed}s`);
   console.log(`  Total rows in PPR CSV: ${result.totalRows}`);
-  console.log(`  New rows ingested: ${result.newRows}`);
+  console.log(`  New rows inserted: ${result.inserted}`);
   console.log(`  Duplicates skipped: ${result.duplicates}`);
   console.log(`  Errors: ${result.errors}`);
-
-  if (result.errors > 0) {
-    console.warn(`\n⚠ ${result.errors} rows failed. Check logs.`);
-    process.exit(1);
-  }
-
-  console.log('\nNext step: refresh the town_metrics materialised view:');
-  console.log('  psql $DATABASE_URL -c "SELECT refresh_town_metrics();"');
+  console.log(`\nRun with --normalise to start AI normalisation of addresses.`);
 }
 
 main().catch((err) => {

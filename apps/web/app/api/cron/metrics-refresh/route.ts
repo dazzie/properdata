@@ -8,8 +8,7 @@
  */
 
 import { NextResponse } from 'next/server';
-// import { db } from '@properdata/db';
-// import { sql } from 'drizzle-orm';
+import { db, sql } from '@properdata/db';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -22,8 +21,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    // TODO: implement in Sprint 1
-    // await db.execute(sql`SELECT refresh_town_metrics()`);
+    await db.execute(sql`SELECT refresh_town_metrics()`);
 
     return NextResponse.json({
       status: 'ok',

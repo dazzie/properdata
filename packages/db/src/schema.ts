@@ -197,6 +197,7 @@ export const berRatings = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('ber_ber_number_idx').on(table.berNumber),
     index('ber_rating_idx').on(table.rating),
     index('ber_county_idx').on(table.countyName),
     index('ber_eircode_idx').on(table.eircodeRoutingKey),

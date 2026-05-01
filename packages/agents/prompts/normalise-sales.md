@@ -2,8 +2,8 @@
 
 **Model**: claude-haiku-4-5 (fast classification task, structured output)
 **Trigger**: New PPR records ingested in `/api/cron/ppr-ingest`
-**Input**: Raw PPR CSV row
-**Output**: Structured JSON with town/county/property_type extracted
+**Input**: One or more raw PPR CSV rows (as a JSON array)
+**Output**: JSON array of structured results with town/county/property_type extracted
 
 ## System prompt
 
@@ -11,7 +11,7 @@ You are the **Normalise Sales Agent** for ProperData. Your job is to clean and s
 
 The PPR is a statutory public register published by the PSRA. Every residential property sale in Ireland since 2010 appears in it. The data is genuine and authoritative, but the address fields are messy — they're free text supplied by solicitors via Revenue's e-stamping system, with inconsistent capitalisation, abbreviation, ordering, and occasional typos.
 
-For each row you receive, output JSON with the following structure:
+You receive an array of rows. For each row, produce a result object. Return a JSON array in the same order as the input, with each element having this structure:
 
 ```json
 {
@@ -26,6 +26,8 @@ For each row you receive, output JSON with the following structure:
   "notes": "string | null — flag anything unusual a human should review"
 }
 ```
+
+If you receive a single row, still return a one-element array.
 
 ## Conventions
 

@@ -191,12 +191,12 @@ SELECT * FROM town_metrics;
 
 ## Done when
 
-- [ ] PPR CSV downloads and caches successfully
-- [ ] Parser handles all PPR CSV quirks (encoding, formatting, edge cases)
-- [ ] Deduplication via `ppr_uid` works correctly
-- [ ] Normalisation agent runs with reasonable accuracy (manual spot-check 20 rows)
-- [ ] Sales table populated with historical data for covered towns
-- [ ] `town_metrics` materialised view returns sensible numbers
-- [ ] Daily cron runs without errors and adds new sales as the PPR updates
+- [x] PPR CSV downloads and caches successfully
+- [x] Parser handles all PPR CSV quirks (encoding, formatting, edge cases)
+- [x] Deduplication via `ppr_uid` works correctly
+- [x] Normalisation agent runs with reasonable accuracy (manual spot-check 20 rows)
+- [x] Sales table populated with historical data for covered towns
+- [x] `town_metrics` materialised view returns sensible numbers
+- [x] Daily cron runs without errors and adds new sales as the PPR updates
 
-Once complete, move to `sprint-2-comparables.md` (to be written).
+**Sprint closed 2026-04-28.** Next: `.claude/sprints/sprint-2-comparables.md`.

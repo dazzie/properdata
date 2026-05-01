@@ -1,48 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "pnpm turbo run build --filter=@properdata/web",
   "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm turbo run build --filter=@properdata/web",
+  "outputDirectory": "apps/web/.next",
   "crons": [
-    {
-      "path": "/api/cron/ppr-ingest",
-      "schedule": "0 2 * * 0",
-      "_comment": "Sunday 02:00 UTC — Download PPR CSV, normalise, geocode, insert"
-    },
-    {
-      "path": "/api/cron/ber-refresh",
-      "schedule": "0 3 1 * *",
-      "_comment": "1st of month 03:00 — Refresh SEAI BER Research Tool dataset"
-    },
-    {
-      "path": "/api/cron/eplanning-scrape",
-      "schedule": "0 8 * * 1",
-      "_comment": "Monday 08:00 — Scrape covered ePlanning portals via Browserless"
-    },
-    {
-      "path": "/api/cron/cso-refresh",
-      "schedule": "0 4 15 * *",
-      "_comment": "15th of month 04:00 — Pull latest CSO StatBank data"
-    },
-    {
-      "path": "/api/cron/metrics-refresh",
-      "schedule": "0 6 * * *",
-      "_comment": "Daily 06:00 — Refresh materialised views (town_metrics, signals)"
-    },
-    {
-      "path": "/api/cron/regulatory-scan",
-      "schedule": "0 7 * * *",
-      "_comment": "Daily 07:00 — Hash-check government pages for policy changes"
-    },
-    {
-      "path": "/api/cron/weekly-pulse",
-      "schedule": "0 14 * * 0",
-      "_comment": "Sunday 14:00 — Generate weekly newsletter draft, notify on Slack"
-    },
-    {
-      "path": "/api/cron/anomaly-detect",
-      "schedule": "0 6 * * 1",
-      "_comment": "Monday 06:00 — Run anomaly detection on refreshed metrics"
-    }
+    { "path": "/api/cron/ppr-ingest", "schedule": "0 2 * * 0" },
+    { "path": "/api/cron/ber-refresh", "schedule": "0 3 1 * *" },
+    { "path": "/api/cron/eplanning-scrape", "schedule": "0 8 * * 1" },
+    { "path": "/api/cron/cso-refresh", "schedule": "0 4 15 * *" },
+    { "path": "/api/cron/metrics-refresh", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/regulatory-scan", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/weekly-pulse", "schedule": "0 14 * * 0" },
+    { "path": "/api/cron/anomaly-detect", "schedule": "0 6 * * 1" }
   ]
 }
