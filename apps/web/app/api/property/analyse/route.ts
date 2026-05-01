@@ -5,7 +5,15 @@ import {
   findComparableCandidates,
   findActiveGrantSchemes,
   findRentBenchmark,
+  getRadonRisk,
+  getSolarPotential,
+  getWalkabilityScore,
+  getDcbRisk,
   type ComparableTarget,
+  type RadonRiskResult,
+  type SolarPotentialResult,
+  type WalkabilityResult,
+  type DcbRiskResult,
 } from '@properdata/db';
 import {
   comparableAnalysis,
@@ -43,6 +51,10 @@ interface AnalyseResponse {
   comparable: ComparableAnalysisResult;
   grants: GrantCalculationResult;
   yield?: YieldAnalysisResult;
+  radon?: RadonRiskResult;
+  solar?: SolarPotentialResult;
+  walkability?: WalkabilityResult;
+  dcb?: DcbRiskResult;
   metadata: {
     elapsedMs: number;
     agentCalls: number;
@@ -226,7 +238,35 @@ export async function POST(request: NextRequest) {
       yieldInput ? yieldAnalysis(yieldInput) : Promise.resolve(null),
     ];
 
-    const [comparableResult, grantResult, yieldResult] = await Promise.all(agentPromises);
+    // Run enrichment queries in parallel with agent calls
+    const hasLocation = req.location?.lat && req.location?.lng;
+
+    const enrichmentPromises = {
+      radon: hasLocation
+        ? getRadonRisk({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
+        : Promise.resolve(null),
+      solar: hasLocation
+        ? getSolarPotential({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
+        : Promise.resolve(null),
+      walkability: hasLocation
+        ? getWalkabilityScore({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
+        : Promise.resolve(null),
+      dcb: Promise.resolve(getDcbRisk({ county: req.county, yearBuilt: req.yearBuilt })),
+    };
+
+    const [
+      [comparableResult, grantResult, yieldResult],
+      radonResult,
+      solarResult,
+      walkabilityResult,
+      dcbResult,
+    ] = await Promise.all([
+      Promise.all(agentPromises),
+      enrichmentPromises.radon,
+      enrichmentPromises.solar,
+      enrichmentPromises.walkability,
+      enrichmentPromises.dcb,
+    ]);
 
     const agentCalls = yieldResult ? 3 : 2;
 
@@ -234,6 +274,10 @@ export async function POST(request: NextRequest) {
       comparable: comparableResult,
       grants: grantResult,
       ...(yieldResult ? { yield: yieldResult } : {}),
+      ...(radonResult ? { radon: radonResult } : {}),
+      ...(solarResult ? { solar: solarResult } : {}),
+      ...(walkabilityResult ? { walkability: walkabilityResult } : {}),
+      ...(dcbResult.riskLevel !== 'none' ? { dcb: dcbResult } : {}),
       metadata: {
         elapsedMs: Date.now() - start,
         agentCalls,
@@ -249,8 +293,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     console.error('Property analysis failed:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Analysis failed. Please try again.' },
+      { error: `Analysis failed: ${message}` },
       { status: 500 },
     );
   }

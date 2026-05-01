@@ -13,6 +13,8 @@ ProperData's yield analysis uses **actual rents from the RTB Rent Index**, not a
 
 ## Output structure
 
+**Your entire response must be a single JSON object — no text before or after it, no markdown fences, no commentary outside the JSON.** Put all caveats inside the `narrative` field.
+
 ```json
 {
   "property": {

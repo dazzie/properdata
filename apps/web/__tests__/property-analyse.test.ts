@@ -15,6 +15,10 @@ vi.mock('@properdata/db', () => ({
   findComparableCandidates: (...args: unknown[]) => mockFindComparableCandidates(...args),
   findActiveGrantSchemes: (...args: unknown[]) => mockFindActiveGrantSchemes(...args),
   findRentBenchmark: (...args: unknown[]) => mockFindRentBenchmark(...args),
+  getRadonRisk: vi.fn().mockResolvedValue(null),
+  getSolarPotential: vi.fn().mockResolvedValue(null),
+  getWalkabilityScore: vi.fn().mockResolvedValue(null),
+  getDcbRisk: vi.fn().mockReturnValue({ riskLevel: 'none', isAffectedCounty: false, context: '', grantEligible: false, grantDetails: null, recommendation: '' }),
 }));
 
 const mockComparableAnalysis = vi.fn();

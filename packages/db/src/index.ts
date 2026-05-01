@@ -30,3 +30,22 @@ export {
   getActiveTownIds,
   type TownMetricsSnapshot,
 } from './queries/anomalies';
+export {
+  getRadonRisk,
+  wgs84ToIrishGrid,
+  type RadonRiskResult,
+} from './queries/radon';
+export {
+  getSolarPotential,
+  calculateSeaiSolarGrant,
+  type SolarPotentialResult,
+} from './queries/solar';
+export {
+  getWalkabilityScore,
+  type WalkabilityResult,
+  type AmenityCount,
+} from './queries/walkability';
+export {
+  getDcbRisk,
+  type DcbRiskResult,
+} from './queries/dcb-risk';

@@ -2,7 +2,7 @@
 
 The running to-do list. Top of the file is highest priority. Tasks are checked `[x]` when complete and `[blocked]` with a reason when stuck.
 
-**Now working on:** Sprint 4 — Data Enrichment: BER, RTB, Anomalies
+**Now working on:** Sprint 5 — UX Novelty: Radon, Solar, Mica, Walkability
 
 **Last updated:** 2026-04-30
 
@@ -83,15 +83,16 @@ See `.claude/sprints/sprint-4-data-enrichment.md`.
 
 ---
 
-## Sprint 5+ — UX novelty additions
+## Sprint 5 — UX Novelty: Radon, Solar, Mica, Walkability
 
-See `docs/08-ux-novelty-additions.md` for tier breakdown and implementation priority.
+See `.claude/sprints/sprint-5-ux-novelty.md`.
 
 **Tier 1 (highest impact):**
-- [ ] 5.1 — Ingest EPA Radon Risk Map; per-address risk lookup
-- [ ] 5.2 — Ingest SEAI Solar Map / PVGIS data; per-property solar potential
-- [ ] 5.3 — Walkability scoring via OpenStreetMap (15-min isochrones)
-- [ ] 5.4 — DCB / Mica risk geography flagging
+- [x] 5.1 — EPA Radon Risk Map; per-address risk lookup (live WFS query)
+- [x] 5.2 — PVGIS solar potential; per-property yield + financial case
+- [x] 5.3 — Walkability scoring via OpenStreetMap Overpass API
+- [x] 5.4 — DCB / Mica risk geography flagging (rule-based)
+- [x] 5.5 — Wire all four into `/api/property/analyse` endpoint
 
 **Tier 2 (lifestyle):**
 - [ ] 5.5 — EPA Strategic Noise Maps integration

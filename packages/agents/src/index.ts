@@ -9,12 +9,19 @@ import type { PropertyAttributes, BuyerContext } from '@properdata/shared';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error('ANTHROPIC_API_KEY is not set');
+function createClient(): Anthropic {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not set');
+  }
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 }
 
-export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+let _client: Anthropic | undefined;
+const anthropic = new Proxy({} as Anthropic, {
+  get(_target, prop, receiver) {
+    if (!_client) _client = createClient();
+    return Reflect.get(_client, prop, receiver);
+  },
 });
 
 // -----------------------------------------------------------------------------
@@ -85,18 +92,38 @@ export async function runAgent<T = unknown>(opts: RunAgentOptions): Promise<T> {
     return textBlock.text as T;
   }
 
-  // Strip any markdown code fences the model may have added
-  const cleaned = textBlock.text
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/, '')
-    .replace(/\s*```\s*$/, '')
-    .trim();
+  // Extract JSON: try the full text first, then look for a ```json block
+  const raw = textBlock.text.trim();
 
+  // Try parsing the whole response as-is
   try {
-    return JSON.parse(cleaned) as T;
-  } catch (err) {
-    throw new Error(`Agent returned invalid JSON: ${(err as Error).message}\n\nResponse:\n${textBlock.text}`);
+    return JSON.parse(raw) as T;
+  } catch {
+    // Not pure JSON — look for a fenced code block
   }
+
+  // Extract the first ```json ... ``` block
+  const fenceMatch = raw.match(/```json\s*\n([\s\S]*?)\n```/i);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]!) as T;
+    } catch (err) {
+      throw new Error(`Agent returned invalid JSON inside code fence: ${(err as Error).message}\n\nExtracted:\n${fenceMatch[1]!.slice(0, 500)}`);
+    }
+  }
+
+  // Last resort: strip leading/trailing non-JSON and try again
+  const braceStart = raw.indexOf('{');
+  const braceEnd = raw.lastIndexOf('}');
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    try {
+      return JSON.parse(raw.slice(braceStart, braceEnd + 1)) as T;
+    } catch {
+      // fall through to error
+    }
+  }
+
+  throw new Error(`Agent returned no parseable JSON\n\nResponse:\n${raw.slice(0, 500)}`);
 }
 
 // -----------------------------------------------------------------------------
@@ -182,7 +209,7 @@ export async function comparableAnalysis(
     promptName: 'comparable-analysis',
     model: 'sonnet',
     input: JSON.stringify(input),
-    maxTokens: 4096,
+    maxTokens: 8192,
     expectJson: true,
   });
 }
@@ -254,7 +281,7 @@ export async function grantCalculator(
     promptName: 'grant-calculator',
     model: 'sonnet',
     input: JSON.stringify(input),
-    maxTokens: 4096,
+    maxTokens: 8192,
     expectJson: true,
   });
 }
