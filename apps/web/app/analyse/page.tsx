@@ -654,6 +654,29 @@ export default function AnalysePage() {
             )}
           </div>
 
+          {/* Report download */}
+          <button
+            type="button"
+            style={S.reportBtn}
+            onClick={() => {
+              import('./generate-report').then(({ generateReport }) => {
+                generateReport({
+                  address: form.address,
+                  county: form.county,
+                  propertyType: form.propertyType,
+                  purchasePrice: Number(form.purchasePrice),
+                  berRating: form.berRating || undefined,
+                  yearBuilt: form.yearBuilt || undefined,
+                  buyerType: form.buyerType,
+                  intendedUse: form.intendedUse,
+                  result,
+                });
+              });
+            }}
+          >
+            Download Due Diligence Report (PDF)
+          </button>
+
           {/* Decision Cards */}
           <div style={S.decisionGrid}>
 
@@ -1144,6 +1167,14 @@ const S: Record<string, React.CSSProperties> = {
   execLabel: { fontSize: '0.65rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.04em' },
   execValue: { fontSize: '1.35rem', fontWeight: 800, color: '#1a1a1a', marginTop: '0.125rem' },
   execSub: { fontSize: '0.7rem', color: '#aaa', marginTop: '0.125rem' },
+
+  // Report button
+  reportBtn: {
+    width: '100%', padding: '0.875rem', fontSize: '1rem', fontWeight: 700,
+    color: '#fff', background: '#1a1a1a', border: 'none', borderRadius: '10px',
+    cursor: 'pointer', fontFamily: 'inherit', marginBottom: '1.25rem',
+    letterSpacing: '0.01em',
+  },
 
   // Decision cards
   decisionGrid: { display: 'flex', flexDirection: 'column' as const, gap: '0.75rem' },
