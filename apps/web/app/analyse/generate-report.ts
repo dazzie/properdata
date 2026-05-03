@@ -95,6 +95,22 @@ interface DcbResult {
   recommendation: string;
 }
 
+interface FloodZoneHit {
+  source: string;
+  returnPeriod: number;
+  dataset: string;
+  studyName: string | null;
+}
+
+interface FloodResult {
+  riskCategory: string;
+  inFloodZone: boolean;
+  zones: FloodZoneHit[];
+  summary: string;
+  context: string;
+  recommendation: string;
+}
+
 interface AnalyseResponse {
   comparable: ComparableResult;
   grants: GrantResult;
@@ -103,6 +119,7 @@ interface AnalyseResponse {
   solar?: SolarResult;
   walkability?: WalkabilityResult;
   dcb?: DcbResult;
+  flood?: FloodResult;
   metadata: { elapsedMs: number; agentCalls: number; estimatedCost: number; from_cache: boolean };
 }
 
@@ -113,8 +130,10 @@ export interface ReportInput {
   purchasePrice: number;
   berRating?: string;
   yearBuilt?: string;
+  bedrooms?: string;
   buyerType: string;
   intendedUse: string;
+  location?: { lat: number; lng: number };
   result: AnalyseResponse;
 }
 
@@ -136,6 +155,68 @@ function formatDate(): string {
   return new Date().toLocaleDateString('en-IE', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function sanitizeNarrative(text: string | null | undefined): string | null {
+  if (!text) return null;
+  let s = text;
+  s = s.replace(/wait\s*[-—]\s*recalculat(ing|e)[^.]*\./gi, '');
+  s = s.replace(/the JSON figure should be treated as[^.]*\./gi, '');
+  s = s.replace(/let me (recalculate|reconsider|correct)[^.]*\./gi, '');
+  s = s.replace(/actually,?\s*(I need to|let me)[^.]*\./gi, '');
+  s = s.replace(/−/g, '-');
+  s = s.replace(/[‐-―]/g, '-');
+  s = s.replace(/\s{2,}/g, ' ');
+  return s.trim() || null;
+}
+
+function isRadonUnknown(radon: RadonResult | undefined): boolean {
+  if (!radon) return true;
+  return radon.riskCategory === 'unknown' || (radon.riskPercent === 0 && radon.riskCategory !== 'low');
+}
+
+function radonSummary(radon: RadonResult | undefined): string {
+  if (!radon) return 'Radon: not assessed (coordinates required).';
+  if (isRadonUnknown(radon)) return 'Radon: unknown — outside EPA mapped coverage. In-home testing recommended.';
+  return `Radon: ${radon.riskCategory} risk (${radon.riskPercent}% of homes in area exceed reference level).`;
+}
+
+interface CanonicalCosts {
+  stampDuty: number;
+  legalFees: number;
+  totalFees: number;
+  conservativeCost: number;
+  centralGrantEstimate: number;
+  baseCost: number;
+  grantTotalHigh: number;
+  croiHigh: number;
+  energyHigh: number;
+  upsideCost: number;
+  bestCost: number;
+}
+
+function computeCanonicalCosts(input: ReportInput, grantCats: GrantCategory[]): CanonicalCosts {
+  const { purchasePrice, result } = input;
+  const nac = result.grants.net_acquisition_cost;
+  const stampDuty = nac?.stamp_duty ?? Math.round(purchasePrice * 0.01);
+  const legalFees = nac?.estimated_legal_fees ?? 2500;
+  const totalFees = stampDuty + legalFees;
+  const conservativeCost = purchasePrice + totalFees;
+
+  const centralGrantEstimate = nac?.total_grants_central ?? 0;
+  const baseCost = conservativeCost - centralGrantEstimate;
+
+  const grantTotalHigh = grantCats.reduce((s, c) => s + c.totalHigh, 0);
+
+  const croiSchemes = (result.grants.applicable_schemes ?? []).filter(
+    (s) => s.code?.includes('CROI') || s.name?.toLowerCase().includes('vacant') || s.name?.toLowerCase().includes('derelict'),
+  );
+  const croiHigh = croiSchemes.reduce((s, g) => s + (g.amount_high ?? 0), 0);
+  const energyHigh = grantCats.find((c) => c.label.includes('Energy'))?.totalHigh ?? 0;
+  const upsideCost = Math.max(0, conservativeCost - centralGrantEstimate - croiHigh);
+  const bestCost = Math.max(0, conservativeCost - energyHigh - croiHigh);
+
+  return { stampDuty, legalFees, totalFees, conservativeCost, centralGrantEstimate, baseCost, grantTotalHigh, croiHigh, energyHigh, upsideCost, bestCost };
+}
+
 function propertyTypeLabel(t: string): string {
   if (!t || t === 'unknown') return 'Unknown';
   return t.replace(/_/g, '-').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -148,6 +229,98 @@ function buyerTypeLabel(t: string): string {
     non_occupier: 'Investor / Non-Occupier',
   };
   return map[t] ?? t;
+}
+
+// ---------------------------------------------------------------------------
+// Static map rendering (OSM tiles → canvas → base64 PNG)
+// ---------------------------------------------------------------------------
+
+async function renderStaticMap(
+  lat: number,
+  lng: number,
+  width: number,
+  height: number,
+  zoom = 14,
+): Promise<string | null> {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const n = Math.pow(2, zoom);
+    const xTileFloat = ((lng + 180) / 360) * n;
+    const yTileFloat =
+      ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n;
+
+    const centerTileX = Math.floor(xTileFloat);
+    const centerTileY = Math.floor(yTileFloat);
+    const offsetX = Math.round((xTileFloat - centerTileX) * 256);
+    const offsetY = Math.round((yTileFloat - centerTileY) * 256);
+
+    const tilesX = Math.ceil(width / 256) + 1;
+    const tilesY = Math.ceil(height / 256) + 1;
+    const startTileX = centerTileX - Math.floor(tilesX / 2);
+    const startTileY = centerTileY - Math.floor(tilesY / 2);
+
+    const loadTile = (tx: number, ty: number): Promise<HTMLImageElement | null> =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        const s = ['a', 'b', 'c'][Math.abs(tx + ty) % 3];
+        img.src = `https://${s}.tile.openstreetmap.org/${zoom}/${((tx % n) + n) % n}/${ty}.png`;
+      });
+
+    const tiles: Array<{ img: HTMLImageElement | null; dx: number; dy: number }> = [];
+    const promises: Promise<void>[] = [];
+
+    for (let ty = 0; ty < tilesY; ty++) {
+      for (let tx = 0; tx < tilesX; tx++) {
+        const tileX = startTileX + tx;
+        const tileY = startTileY + ty;
+        const dx = width / 2 - offsetX + (tileX - centerTileX) * 256;
+        const dy = height / 2 - offsetY + (tileY - centerTileY) * 256;
+        const entry = { img: null as HTMLImageElement | null, dx, dy };
+        tiles.push(entry);
+        promises.push(loadTile(tileX, tileY).then((img) => { entry.img = img; }));
+      }
+    }
+
+    await Promise.all(promises);
+
+    for (const tile of tiles) {
+      if (tile.img) ctx.drawImage(tile.img, tile.dx, tile.dy, 256, 256);
+    }
+
+    // Draw marker at center
+    const cx = width / 2;
+    const cy = height / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 8, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#1D9E75';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy - 8, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+
+    // OSM attribution
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(0, height - 14, width, 14);
+    ctx.fillStyle = '#666';
+    ctx.font = '9px sans-serif';
+    ctx.fillText('© OpenStreetMap contributors', 4, height - 4);
+
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
 }
 
 const BRAND = { green: [29, 158, 117] as [number, number, number] };
@@ -228,8 +401,9 @@ function assessCompleteness(input: ReportInput): { score: number; fields: DataFi
     { field: 'County', status: input.county ? 'provided' : 'missing', impact: 'Required for all analysis' },
     { field: 'Purchase price', status: input.purchasePrice > 0 ? 'provided' : 'missing', impact: 'Required for valuation and yield' },
     { field: 'Property type', status: input.propertyType && input.propertyType !== 'unknown' ? 'provided' : 'missing', impact: 'Affects SEAI grant values and valuation confidence' },
+    { field: 'Bedrooms', status: input.bedrooms ? 'provided' : 'missing', impact: 'Critical for valuation precision and rental yield estimate' },
     { field: 'BER rating', status: input.berRating ? 'provided' : 'missing', impact: 'Affects retrofit and SEAI grant estimates' },
-    { field: 'Year built', status: input.yearBuilt ? 'provided' : 'missing', impact: 'Affects SEAI eligibility and DCB risk' },
+    { field: 'Year built', status: input.yearBuilt ? 'provided' : 'missing', impact: 'Affects SEAI eligibility and structural risk assessment' },
     { field: 'Coordinates', status: input.result.radon || input.result.solar || input.result.walkability ? 'provided' : 'missing', impact: 'Required for radon, solar, walkability' },
     { field: 'Comparable distance', status: input.result.comparable.comparables_used?.some((c) => c.distance_meters != null) ? 'provided' : 'missing', impact: 'Affects valuation confidence' },
   ];
@@ -256,11 +430,18 @@ function computeScorecard(input: ReportInput): ScoreItem[] {
 
   // Comparable confidence
   const confMap: Record<string, number> = { high: 85, medium: 55, low: 25 };
-  items.push({ dimension: 'Comparable confidence', score: confMap[result.comparable.confidence] ?? 40, note: `${result.comparable.comparables_used?.length ?? 0} comparables, ${result.comparable.confidence}` });
+  const comps = result.comparable.comparables_used ?? [];
+  const distVerified = comps.filter((c) => c.distance_meters != null).length;
+  const confNote = distVerified > 0
+    ? `${comps.length} identified, ${distVerified} distance-verified, ${result.comparable.confidence} confidence`
+    : `${comps.length} identified, none distance-verified, ${result.comparable.confidence} confidence`;
+  items.push({ dimension: 'Comparable confidence', score: confMap[result.comparable.confidence] ?? 40, note: confNote });
 
-  // Grant upside
-  const grantPct = purchasePrice > 0 ? (result.grants.total_grants_high / purchasePrice) * 100 : 0;
-  items.push({ dimension: 'Grant upside', score: Math.min(100, Math.round(grantPct * 5)), note: `Up to ${eur(result.grants.total_grants_high)} (${Math.round(grantPct)}% of price)` });
+  // Grant upside — use computed total from categorised grants for consistency
+  const grantCats = categoriseGrants(result.grants.applicable_schemes ?? []);
+  const grantTotalHigh = grantCats.reduce((s, c) => s + c.totalHigh, 0);
+  const grantPct = purchasePrice > 0 ? (grantTotalHigh / purchasePrice) * 100 : 0;
+  items.push({ dimension: 'Grant upside', score: Math.min(100, Math.round(grantPct * 5)), note: `Up to ${eur(grantTotalHigh)} (${Math.round(grantPct)}% of price)` });
 
   // Location
   if (result.walkability) {
@@ -269,11 +450,27 @@ function computeScorecard(input: ReportInput): ScoreItem[] {
 
   // Environmental risk (inverted — higher = safer)
   let envScore = 80;
+  const radonIsUnknown = isRadonUnknown(result.radon);
   if (result.radon?.riskCategory === 'high') envScore -= 30;
   else if (result.radon?.riskCategory === 'medium') envScore -= 15;
+  else if (radonIsUnknown) envScore -= 10;
   if (result.dcb?.riskLevel === 'high') envScore -= 30;
   else if (result.dcb?.riskLevel === 'medium') envScore -= 15;
-  items.push({ dimension: 'Environmental safety', score: Math.max(0, envScore), note: envScore >= 70 ? 'Low risk profile' : 'Elevated risk — see Section 8' });
+  if (result.flood?.riskCategory === 'high') envScore -= 30;
+  else if (result.flood?.riskCategory === 'medium') envScore -= 15;
+  else if (!result.flood) envScore -= 10;
+
+  const envParts: string[] = [];
+  if (radonIsUnknown) envParts.push('radon unknown');
+  else if (result.radon?.riskCategory === 'high') envParts.push('radon high');
+  else if (result.radon?.riskCategory === 'medium') envParts.push('radon medium');
+  if (result.flood?.inFloodZone) envParts.push(`flood ${result.flood.riskCategory}`);
+  else if (!result.flood) envParts.push('flood not assessed');
+  if (result.dcb?.riskLevel === 'high' || result.dcb?.riskLevel === 'medium') envParts.push(`DCB ${result.dcb.riskLevel}`);
+  const allClear = envParts.length === 0;
+  const envNote = allClear ? 'Low risk profile — all checks passed' :
+    envScore >= 60 ? `Partial assessment — ${envParts.join(', ')}` : `Elevated risk — ${envParts.join(', ')}`;
+  items.push({ dimension: 'Environmental safety', score: Math.max(0, envScore), note: envNote });
 
   // Retrofit opportunity
   if (result.solar) {
@@ -292,8 +489,8 @@ function computeScorecard(input: ReportInput): ScoreItem[] {
 // PDF Generation
 // ---------------------------------------------------------------------------
 
-export function generateReport(input: ReportInput): void {
-  const { result, address, county, propertyType, purchasePrice, berRating, yearBuilt, buyerType, intendedUse } = input;
+export async function generateReport(input: ReportInput): Promise<void> {
+  const { result, address, county, propertyType, purchasePrice, berRating, yearBuilt, buyerType, intendedUse, location } = input;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const MARGIN = 18;
@@ -410,37 +607,85 @@ export function generateReport(input: ReportInput): void {
   }
   y += 20;
 
+  // Location map
+  if (location) {
+    const mapImg = await renderStaticMap(location.lat, location.lng, 600, 200, 14);
+    if (mapImg) {
+      const mapH = 40;
+      checkPage(mapH + 4);
+      doc.addImage(mapImg, 'PNG', MARGIN, y, CONTENT_W, mapH);
+      y += mapH + 4;
+    }
+  }
+
   // =========================================================================
   // 1. Executive Summary
   // =========================================================================
 
   heading('Executive Summary', 1);
 
-  const summaryPoints: string[] = [];
-  summaryPoints.push(`Fair value estimate: ${eur(result.comparable.fair_value_central)} (${eur(result.comparable.fair_value_low)} - ${eur(result.comparable.fair_value_high)}), ${result.comparable.confidence} confidence.`);
-
-  // Categorised grant summary
   const grantCats = categoriseGrants(result.grants.applicable_schemes ?? []);
+  const costs = computeCanonicalCosts(input, grantCats);
+  const hasVacantGrant = (result.grants.applicable_schemes ?? []).some((s) => s.code?.includes('CROI') || s.name?.toLowerCase().includes('vacant'));
+
+  const askVsFair = result.comparable.fair_value_central
+    ? ((purchasePrice - result.comparable.fair_value_central) / result.comparable.fair_value_central) * 100
+    : null;
+
+  const summaryPoints: string[] = [];
+
+  // Valuation
+  const compsUsed = result.comparable.comparables_used ?? [];
+  const distVerifiedCount = compsUsed.filter((c) => c.distance_meters != null).length;
+  let valNote = `Fair value estimate: ${eur(result.comparable.fair_value_central)} (${eur(result.comparable.fair_value_low)} - ${eur(result.comparable.fair_value_high)}).`;
+  if (askVsFair != null) {
+    const dir = askVsFair >= 0 ? 'above' : 'below';
+    valNote += ` Purchase price is ${Math.abs(Math.round(askVsFair))}% ${dir} central estimate.`;
+  }
+  valNote += ` Confidence: ${result.comparable.confidence} (${compsUsed.length} comparables identified${distVerifiedCount > 0 ? `, ${distVerifiedCount} distance-verified` : ', none distance-verified'}).`;
+  summaryPoints.push(valNote);
+
+  // Grants
   if (grantCats.length > 0) {
     const parts = grantCats.map((c) => `${c.label}: up to ${eur(c.totalHigh)}`);
-    summaryPoints.push(`Grant opportunity: ${parts.join('; ')}.`);
+    summaryPoints.push(`Grant opportunity: ${parts.join('; ')}. Total identified: up to ${eur(costs.grantTotalHigh)}.`);
   }
 
-  if (result.grants.net_acquisition_cost) {
-    summaryPoints.push(`Effective acquisition cost (base scenario): ${eur(result.grants.net_acquisition_cost.effective_cost)}.`);
+  // Effective cost — canonical calculation
+  summaryPoints.push(`Base effective acquisition cost: ${eur(costs.baseCost)} (${eur(purchasePrice)} + ${eur(costs.stampDuty)} stamp duty + ${eur(costs.legalFees)} legal fees - ${eur(costs.centralGrantEstimate)} central grant estimate).`);
+  if (costs.croiHigh > 0) {
+    summaryPoints.push(`Additional upside: Croi Conaithe may provide up to ${eur(costs.croiHigh)} if vacancy or dereliction criteria are met; not included in base scenario.`);
   }
+
+  // Yield
   if (result.yield) {
     summaryPoints.push(`Rental yield: ${result.yield.yields.gross_yield_annual}% gross, ${result.yield.yields.net_yield_annual}% net, ${result.yield.yields.tax_adjusted_yield}% after tax (RTB data).`);
   }
-  if (result.radon) {
-    summaryPoints.push(`Radon: ${result.radon.riskCategory} risk (${result.radon.riskPercent}% of homes in area exceed reference level).`);
+
+  // Radon — handle unknown properly
+  summaryPoints.push(radonSummary(result.radon));
+
+  // Flood
+  if (result.flood) {
+    if (result.flood.inFloodZone) {
+      const zoneTypes = [...new Set(result.flood.zones.map((z) => z.source))].join('/');
+      summaryPoints.push(`Flood risk: ${result.flood.riskCategory} — property is within ${zoneTypes} flood zone(s). ${result.flood.recommendation}`);
+    } else {
+      summaryPoints.push('Flood risk: none identified — not within any OPW mapped flood zone.');
+    }
+  } else {
+    summaryPoints.push('Flood risk: not assessed (coordinates required). Verify on OPW flood maps before purchase.');
   }
+
+  // Solar
   if (result.solar) {
     summaryPoints.push(`Solar: ${result.solar.annualYieldKwh.toLocaleString()} kWh/yr, ${result.solar.financial.paybackYears}-year payback after SEAI grant.`);
   }
+  // Walkability
   if (result.walkability) {
     summaryPoints.push(`Walkability: ${result.walkability.score}/100 (${result.walkability.label}).`);
   }
+  // DCB
   if (result.dcb && result.dcb.riskLevel !== 'none') {
     summaryPoints.push(`Defective blocks: ${result.dcb.riskLevel} risk.${result.dcb.grantEligible ? ' May qualify for remediation grant.' : ''}`);
   }
@@ -455,17 +700,25 @@ export function generateReport(input: ReportInput): void {
 
   const actions: string[] = [];
   if (!propertyType || propertyType === 'unknown') actions.push('Confirm property type, bedrooms, and floor area to improve valuation accuracy and grant estimates.');
+  if (!input.bedrooms) actions.push('Confirm number of bedrooms — critical for valuation precision and rental yield estimates.');
   if (!berRating) actions.push('Obtain BER certificate to establish retrofit baseline and determine SEAI grant eligibility.');
   if (!yearBuilt) actions.push('Confirm year built to assess SEAI eligibility and structural risk factors.');
 
-  const hasVacantGrant = (result.grants.applicable_schemes ?? []).some((s) => s.code?.includes('CROI') || s.name?.toLowerCase().includes('vacant'));
-  if (hasVacantGrant) actions.push('Verify vacancy status (2+ years) for Croi Conaithe eligibility - this could materially change the economics.');
+  if (hasVacantGrant) actions.push('Verify vacancy status (2+ years) for Croi Conaithe eligibility — this could materially change the economics.');
 
   actions.push('Instruct an independent survey and solicitor title check.');
-  actions.push('Verify flood risk on OPW flood maps (floodinfo.ie).');
+  if (result.flood?.inFloodZone) {
+    actions.push(`Obtain site-specific flood risk assessment — property is in a ${result.flood.riskCategory}-risk flood zone.`);
+  } else if (!result.flood) {
+    actions.push('Verify flood risk on OPW flood maps (floodinfo.ie) — automated check requires coordinates.');
+  }
 
-  if (result.radon?.riskCategory === 'high') actions.push(`Commission radon test before purchase (${result.radon.testCost}).`);
-  if (result.grants.applicable_schemes?.length) actions.push('Review grant eligibility in Section 5 and begin applications for confirmed schemes.');
+  if (result.radon?.riskCategory === 'high') {
+    actions.push(`Commission radon test before purchase (${result.radon.testCost}).`);
+  } else if (isRadonUnknown(result.radon)) {
+    actions.push('Commission radon test — property is outside EPA mapped coverage, so risk is unknown.');
+  }
+  if (result.grants.applicable_schemes?.length) actions.push('Review grant eligibility in Section 6 and begin applications for confirmed schemes.');
   if (result.solar) actions.push('Get a site-specific solar assessment to confirm roof orientation and shading.');
 
   bulletList(actions);
@@ -533,16 +786,13 @@ export function generateReport(input: ReportInput): void {
   keyValue('Confidence', result.comparable.confidence,
     result.comparable.confidence === 'high' ? GREEN_DARK : result.comparable.confidence === 'medium' ? AMBER : RED);
 
-  const askVsFair = result.comparable.fair_value_central
-    ? ((purchasePrice - result.comparable.fair_value_central) / result.comparable.fair_value_central) * 100
-    : null;
   if (askVsFair != null) {
     const dir = askVsFair >= 0 ? 'above' : 'below';
     keyValue('Price vs fair value', `${Math.abs(Math.round(askVsFair))}% ${dir}`,
       askVsFair > 10 ? AMBER : askVsFair < -10 ? GREEN_DARK : GREY.dark);
   }
   y += 2;
-  body(result.comparable.narrative);
+  body(sanitizeNarrative(result.comparable.narrative));
 
   // =========================================================================
   // 5. Comparable Sales
@@ -622,7 +872,7 @@ export function generateReport(input: ReportInput): void {
     y = getLastTableY(doc) + 5;
   }
 
-  body(result.grants.narrative);
+  body(sanitizeNarrative(result.grants.narrative));
 
   // =========================================================================
   // 7. Effective Cost Scenarios
@@ -630,30 +880,28 @@ export function generateReport(input: ReportInput): void {
 
   heading('Effective Cost Scenarios', 7);
 
-  if (result.grants.net_acquisition_cost) {
-    const nac = result.grants.net_acquisition_cost;
-    const fees = (nac.stamp_duty ?? 0) + (nac.estimated_legal_fees ?? 0);
-    const conservativeCost = purchasePrice + fees;
-    const baseCost = nac.effective_cost;
-
-    // Find Croi Conaithe high value
-    const croiSchemes = (result.grants.applicable_schemes ?? []).filter(
-      (s) => s.code?.includes('CROI') || s.name?.toLowerCase().includes('vacant') || s.name?.toLowerCase().includes('derelict'),
-    );
-    const croiHigh = croiSchemes.reduce((s, g) => s + (g.amount_high ?? 0), 0);
-    const energyHigh = grantCats.find((c) => c.label.includes('Energy'))?.totalHigh ?? 0;
-    const upsideCost = conservativeCost - (nac.total_grants_central ?? 0) - croiHigh;
-    const bestCost = conservativeCost - energyHigh - croiHigh;
+  {
+    // Calculation audit block
+    subheading('Base Calculation');
+    keyValue('Purchase price', eur(purchasePrice));
+    keyValue('Stamp duty', eur(costs.stampDuty));
+    keyValue('Estimated legal fees', eur(costs.legalFees));
+    keyValue('Central grant estimate', negEur(costs.centralGrantEstimate), GREEN_DARK);
+    y += 1;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(MARGIN + 55, y - 1, MARGIN + 100, y - 1);
+    keyValue('Base effective cost', eur(costs.baseCost), BRAND.green);
+    y += 3;
 
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
       head: [['Scenario', 'Assumption', 'Effective Cost']],
       body: [
-        ['Conservative', 'No grants confirmed', eur(conservativeCost)],
-        ['Base', 'Central SEAI grant estimate applied', eur(baseCost)],
-        ...(croiHigh > 0 ? [['Upside', 'Base + Croi Conaithe confirmed', eur(Math.max(0, upsideCost))]] : []),
-        ...(croiHigh > 0 && energyHigh > 0 ? [['Best case', 'Full SEAI + Croi Conaithe (caveat: verify eligibility)', eur(Math.max(0, bestCost))]] : []),
+        ['Conservative', 'No grants confirmed', eur(costs.conservativeCost)],
+        ['Base', `Central grant estimate (${eur(costs.centralGrantEstimate)}) applied`, eur(costs.baseCost)],
+        ...(costs.croiHigh > 0 ? [['Upside', `Base + Croi Conaithe confirmed (${eur(costs.croiHigh)})`, eur(costs.upsideCost)]] : []),
+        ...(costs.croiHigh > 0 && costs.energyHigh > 0 ? [['Best case', `Full SEAI (${eur(costs.energyHigh)}) + Croi Conaithe — verify eligibility`, eur(costs.bestCost)]] : []),
       ],
       styles: { fontSize: 8, cellPadding: 2.5 },
       headStyles: { fillColor: BRAND.green, textColor: [255, 255, 255], fontStyle: 'bold' },
@@ -662,7 +910,13 @@ export function generateReport(input: ReportInput): void {
     });
     y = getLastTableY(doc) + 4;
 
-    body('Important: Grant eligibility must be confirmed with the relevant scheme administrator before relying on these scenarios. Some schemes are mutually exclusive and cannot be stacked.');
+    const scenarioNotes = [
+      'Conservative scenario includes purchase price, stamp duty, and legal fees only.',
+      'Base scenario applies the central SEAI energy grant estimate.',
+      costs.croiHigh > 0 ? 'Upside scenario should only be used if vacancy criteria are confirmed with the local authority.' : null,
+      'Eligibility must be confirmed by the relevant scheme administrator. Some schemes are mutually exclusive.',
+    ].filter(Boolean) as string[];
+    bulletList(scenarioNotes);
 
     if (result.yield) {
       subheading('Investor Scenario');
@@ -672,7 +926,7 @@ export function generateReport(input: ReportInput): void {
       keyValue('After-tax yield', `${result.yield.yields.tax_adjusted_yield}%`);
       keyValue('Rent source', result.yield.property.rent_data_source);
       y += 2;
-      body(result.yield.narrative);
+      body(sanitizeNarrative(result.yield.narrative));
     }
   }
 
@@ -752,14 +1006,23 @@ export function generateReport(input: ReportInput): void {
 
   if (result.radon) {
     subheading('Radon');
-    keyValue('Risk level', result.radon.riskCategory.toUpperCase(),
-      result.radon.riskCategory === 'high' ? RED : result.radon.riskCategory === 'medium' ? AMBER : GREEN_DARK);
-    keyValue('Area prevalence', `${result.radon.riskPercent}% above reference level`);
-    keyValue('Test cost', result.radon.testCost);
-    keyValue('Remediation cost', result.radon.remediationCost);
-    y += 1;
-    body(result.radon.riskDescription);
-    body(result.radon.context);
+    if (isRadonUnknown(result.radon)) {
+      keyValue('Risk level', 'UNKNOWN', AMBER);
+      keyValue('Coverage', 'Outside EPA radon risk mapping coverage');
+      keyValue('Test cost', result.radon.testCost);
+      keyValue('Recommendation', 'In-home radon test recommended before purchase');
+      y += 1;
+      body('This property is outside the EPA national radon survey mapped area. The 0% prevalence figure is a data gap, not a confirmed low-risk reading. An in-home radon test is the only way to determine actual risk.');
+    } else {
+      keyValue('Risk level', result.radon.riskCategory.toUpperCase(),
+        result.radon.riskCategory === 'high' ? RED : result.radon.riskCategory === 'medium' ? AMBER : GREEN_DARK);
+      keyValue('Area prevalence', `${result.radon.riskPercent}% above reference level`);
+      keyValue('Test cost', result.radon.testCost);
+      keyValue('Remediation cost', result.radon.remediationCost);
+      y += 1;
+      body(result.radon.riskDescription);
+      body(result.radon.context);
+    }
   }
 
   if (result.dcb) {
@@ -776,7 +1039,25 @@ export function generateReport(input: ReportInput): void {
   }
 
   subheading('Flood Risk');
-  body('Flood risk has not been assessed in this report. Check the OPW National Flood Hazard Mapping at floodinfo.ie for the property location before purchase.');
+  if (result.flood) {
+    keyValue('Risk category', result.flood.riskCategory.toUpperCase(),
+      result.flood.riskCategory === 'high' ? RED : result.flood.riskCategory === 'medium' ? AMBER : GREEN_DARK);
+    keyValue('In flood zone', result.flood.inFloodZone ? 'Yes' : 'No',
+      result.flood.inFloodZone ? RED : GREEN_DARK);
+    if (result.flood.zones.length > 0) {
+      for (const z of result.flood.zones) {
+        keyValue(`${z.source} (${z.dataset.toUpperCase()})`, `1-in-${z.returnPeriod} year`);
+      }
+    }
+    y += 1;
+    body(result.flood.summary);
+    body(result.flood.context);
+    if (result.flood.inFloodZone) {
+      body(result.flood.recommendation);
+    }
+  } else {
+    body('Flood risk has not been assessed in this report. Coordinates are required for the OPW flood map lookup. Check floodinfo.ie before purchase.');
+  }
 
   if (!result.radon && !result.dcb) {
     body('Limited environmental risk data available. Provide coordinates to enable radon and location-specific checks.');
@@ -790,15 +1071,10 @@ export function generateReport(input: ReportInput): void {
 
   const flags: Array<{ flag: string; severity: string; detail: string }> = [];
 
-  // Detected issues
+  // Valuation flags
   if (result.comparable.confidence === 'low') {
-    flags.push({ flag: 'Low valuation confidence', severity: 'HIGH', detail: 'Fewer than 3 relevant comparables found. Fair value range may be unreliable. Consider an independent valuation.' });
-  }
-  if (result.radon && result.radon.riskCategory === 'high') {
-    flags.push({ flag: 'High radon risk area', severity: 'MEDIUM', detail: `${result.radon.riskPercent}% of homes exceed reference level. Commission radon test (${result.radon.testCost}).` });
-  }
-  if (result.dcb && (result.dcb.riskLevel === 'high' || result.dcb.riskLevel === 'medium')) {
-    flags.push({ flag: 'Defective block risk', severity: result.dcb.riskLevel === 'high' ? 'HIGH' : 'MEDIUM', detail: result.dcb.recommendation });
+    const localCount = compsUsed.filter((c) => c.weight === 'high').length;
+    flags.push({ flag: 'Low valuation confidence', severity: 'HIGH', detail: `${compsUsed.length} comparables identified, ${localCount > 0 ? `${localCount} genuine local references` : 'none are strong local matches'}, ${distVerifiedCount > 0 ? `${distVerifiedCount} distance-verified` : 'none distance-verified'}. Independent valuation recommended.` });
   }
   if (askVsFair != null && askVsFair > 10) {
     flags.push({ flag: 'Price above fair value', severity: 'MEDIUM', detail: `Price is ${Math.round(askVsFair)}% above central fair value. Consider condition, spec, or market timing.` });
@@ -806,22 +1082,48 @@ export function generateReport(input: ReportInput): void {
   if (askVsFair != null && askVsFair < -20) {
     flags.push({ flag: 'Price well below fair value', severity: 'MEDIUM', detail: `Price is ${Math.abs(Math.round(askVsFair))}% below fair value. Investigate condition, title, or vacancy.` });
   }
+
+  // Environmental flags
+  if (result.flood?.inFloodZone) {
+    const zoneTypes = [...new Set(result.flood.zones.map((z) => z.source))].join('/');
+    flags.push({ flag: `In ${zoneTypes} flood zone`, severity: result.flood.riskCategory === 'high' ? 'HIGH' : 'MEDIUM', detail: result.flood.recommendation });
+  } else if (!result.flood) {
+    flags.push({ flag: 'Flood risk not assessed', severity: 'MEDIUM', detail: 'OPW flood-map verification required before purchase. Coordinates needed for automated check.' });
+  }
+  if (isRadonUnknown(result.radon)) {
+    flags.push({ flag: 'Radon mapping unavailable', severity: 'MEDIUM', detail: 'Outside EPA mapped coverage. In-home radon test recommended — unknown should not be treated as low risk.' });
+  } else if (result.radon?.riskCategory === 'high') {
+    flags.push({ flag: 'High radon risk area', severity: 'MEDIUM', detail: `${result.radon.riskPercent}% of homes exceed reference level. Commission radon test (${result.radon.testCost}).` });
+  }
+  if (result.dcb && (result.dcb.riskLevel === 'high' || result.dcb.riskLevel === 'medium')) {
+    flags.push({ flag: 'Defective block risk', severity: result.dcb.riskLevel === 'high' ? 'HIGH' : 'MEDIUM', detail: result.dcb.recommendation });
+  }
+
+  // Yield flags
   if (result.yield && result.yield.yields.net_yield_annual < 2) {
     flags.push({ flag: 'Sub-2% net yield', severity: 'MEDIUM', detail: 'Net yield below 2%. May generate minimal or negative cash flow after tax.' });
   }
 
+  // Grant flags
+  if (hasVacantGrant) {
+    flags.push({ flag: 'Croi Conaithe eligibility unknown', severity: 'MEDIUM', detail: 'Vacancy/dereliction status could materially change effective cost. Confirm 2+ years vacancy before relying on grant economics.' });
+  }
+
   // Missing data flags
   if (!propertyType || propertyType === 'unknown') {
-    flags.push({ flag: 'Property type unknown', severity: 'MEDIUM', detail: 'Affects SEAI grant values and valuation confidence. Confirm property type.' });
+    flags.push({ flag: 'Property type unknown', severity: 'MEDIUM', detail: 'Affects SEAI grant values, valuation confidence, and comparable selection. Confirm property type.' });
+  }
+  if (!input.bedrooms) {
+    flags.push({ flag: 'Bedrooms unknown', severity: 'HIGH', detail: 'Critical for valuation precision and rental yield estimates. Confirm bedroom count.' });
   }
   if (!berRating) {
     flags.push({ flag: 'BER unknown', severity: 'MEDIUM', detail: 'Retrofit and grant assumptions depend on BER and build year. Obtain BER certificate.' });
   }
+  if (!yearBuilt) {
+    flags.push({ flag: 'Year built unknown', severity: 'MEDIUM', detail: 'Impacts SEAI eligibility (pre-2021 requirement) and structural risk assessment.' });
+  }
   if (!result.comparable.comparables_used?.some((c) => c.distance_meters != null)) {
     flags.push({ flag: 'Comparable distances unavailable', severity: 'LOW', detail: 'Spatial proximity to comparables could not be verified. Valuation relies on address matching.' });
-  }
-  if (hasVacantGrant) {
-    flags.push({ flag: 'Vacancy status unconfirmed', severity: 'HIGH', detail: 'Croi Conaithe eligibility depends on 2+ years vacancy. Confirm before relying on grant economics.' });
   }
   if (!result.radon && !result.solar && !result.walkability) {
     flags.push({ flag: 'No location enrichments', severity: 'LOW', detail: 'Coordinates not available. Radon, solar, and walkability checks were skipped.' });
@@ -858,12 +1160,12 @@ export function generateReport(input: ReportInput): void {
     { item: 'Verify title with solicitor (folio, charges, rights of way)', status: 'TODO' },
     { item: 'Check planning history on local authority portal', status: 'TODO' },
     { item: 'Confirm BER certificate is current', status: berRating ? 'PROVIDED' : 'TODO' },
-    { item: 'Commission radon test', status: result.radon?.riskCategory === 'high' ? 'RECOMMENDED' : result.radon ? 'OPTIONAL' : 'TODO' },
+    { item: 'Commission radon test', status: result.radon?.riskCategory === 'high' || isRadonUnknown(result.radon) ? 'RECOMMENDED' : result.radon ? 'OPTIONAL' : 'TODO' },
     { item: 'Check for defective concrete blocks (engineer)', status: result.dcb?.riskLevel === 'high' ? 'RECOMMENDED' : 'OPTIONAL' },
     { item: 'Verify vacancy status for Croi Conaithe eligibility', status: hasVacantGrant ? 'RECOMMENDED' : 'N/A' },
     { item: 'Apply for applicable grants (see Section 6)', status: result.grants.applicable_schemes?.length > 0 ? 'ACTION' : 'N/A' },
     { item: 'Obtain solar assessment for exact roof orientation', status: result.solar ? 'OPTIONAL' : 'N/A' },
-    { item: 'Verify flood risk on OPW flood maps (floodinfo.ie)', status: 'TODO' },
+    { item: 'Verify flood risk on OPW flood maps (floodinfo.ie)', status: result.flood?.inFloodZone ? 'RECOMMENDED' : result.flood ? 'DONE' : 'TODO' },
     { item: 'Check property tax (LPT) band with Revenue', status: 'TODO' },
     { item: 'Review management fees (apartment/duplex)', status: propertyType === 'apartment' || propertyType === 'duplex' ? 'TODO' : 'N/A' },
     { item: 'Confirm RPZ status if buying to let', status: intendedUse === 'rental' || intendedUse === 'mixed' ? 'TODO' : 'N/A' },

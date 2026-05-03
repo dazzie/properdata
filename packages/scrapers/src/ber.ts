@@ -85,7 +85,7 @@ export async function downloadBerCsv(): Promise<string> {
 function normaliseCounty(raw: string): string {
   let c = raw.trim();
   // SEAI sometimes uses "Co. Westmeath" or "Westmeath" or "WESTMEATH"
-  c = c.replace(/^Co\.?\s*/i, '');
+  c = c.replace(/^Co\.\s*/i, '');
   // Title case
   c = c
     .toLowerCase()

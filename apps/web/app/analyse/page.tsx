@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, type FormEvent } from 'react';
+import { useState, useCallback, useRef, useEffect, lazy, Suspense, type FormEvent } from 'react';
+
+const PropertyMap = lazy(() => import('./PropertyMap'));
 
 // ---------------------------------------------------------------------------
 // Types mirroring the API response
@@ -106,6 +108,22 @@ interface DcbResult {
   recommendation: string;
 }
 
+interface FloodZoneHit {
+  source: string;
+  returnPeriod: number;
+  dataset: string;
+  studyName: string | null;
+}
+
+interface FloodResult {
+  riskCategory: string;
+  inFloodZone: boolean;
+  zones: FloodZoneHit[];
+  summary: string;
+  context: string;
+  recommendation: string;
+}
+
 interface AnalyseResponse {
   comparable: ComparableResult;
   grants: GrantResult;
@@ -114,6 +132,7 @@ interface AnalyseResponse {
   solar?: SolarResult;
   walkability?: WalkabilityResult;
   dcb?: DcbResult;
+  flood?: FloodResult;
   metadata: {
     elapsedMs: number;
     agentCalls: number;
@@ -353,11 +372,43 @@ export default function AnalysePage() {
     return null;
   }, [nominatimSearch]);
 
+  const [berSource, setBerSource] = useState<string | null>(null);
+
+  const lookupBer = useCallback(async (eircode: string | null, county: string, propertyType: string | null) => {
+    if (!county) return;
+    try {
+      const params = new URLSearchParams();
+      if (eircode && eircode.length >= 3) params.set('eircode', eircode);
+      params.set('county', county);
+      if (propertyType && propertyType !== 'unknown') params.set('property_type', propertyType);
+      const res = await fetch(`/api/property/ber-lookup?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.found) return;
+      setForm((f) => ({
+        ...f,
+        berRating: f.berRating || data.rating,
+        yearBuilt: f.yearBuilt || (data.yearBuilt ? String(data.yearBuilt) : ''),
+      }));
+      const areaLabel = eircode && eircode.length >= 3
+        ? `${eircode.slice(0, 3)} area`
+        : county;
+      setBerSource(
+        data.isAreaEstimate
+          ? `SEAI area estimate (${data.sampleSize.toLocaleString()} BER certs, ${areaLabel})`
+          : 'SEAI BER register',
+      );
+    } catch {
+      // BER lookup is best-effort
+    }
+  }, []);
+
   const selectProperty = useCallback(async (p: SearchResult) => {
     setSearchQuery(p.address_normalised ?? p.address_raw);
     setSearchOpen(false);
     setResult(null);
     setError(null);
+    setBerSource(null);
 
     let lat = p.lat != null ? String(p.lat) : '';
     let lng = p.lng != null ? String(p.lng) : '';
@@ -376,20 +427,26 @@ export default function AnalysePage() {
       intendedUse: 'owner_occupier',
     });
 
-    if (!lat || !lng) {
-      setGeocoding(true);
-      const geo = await geocodeAddress(
-        p.address_normalised ?? p.address_raw,
-        p.county,
-      );
-      setGeocoding(false);
-      if (geo) {
-        lat = geo.lat;
-        lng = geo.lng;
-        setForm((f) => ({ ...f, lat, lng }));
-      }
-    }
-  }, [geocodeAddress]);
+    const geoPromise = (!lat || !lng)
+      ? (async () => {
+          setGeocoding(true);
+          const geo = await geocodeAddress(
+            p.address_normalised ?? p.address_raw,
+            p.county,
+          );
+          setGeocoding(false);
+          if (geo) {
+            lat = geo.lat;
+            lng = geo.lng;
+            setForm((f) => ({ ...f, lat, lng }));
+          }
+        })()
+      : Promise.resolve();
+
+    const berPromise = lookupBer(p.eircode, p.county, p.property_type);
+
+    await Promise.all([geoPromise, berPromise]);
+  }, [geocodeAddress, lookupBer]);
 
   const applyPreset = (preset: (typeof PRESETS)[number]) => {
     setForm({
@@ -550,12 +607,17 @@ export default function AnalysePage() {
           </label>
           <label style={S.field}>
             <span style={S.label}>BER rating</span>
-            <input style={S.input} value={form.berRating} onChange={(e) => set('berRating', e.target.value)} placeholder="e.g. D2" />
+            <input style={S.input} value={form.berRating} onChange={(e) => { set('berRating', e.target.value); setBerSource(null); }} placeholder="e.g. D2" />
           </label>
           <label style={S.field}>
             <span style={S.label}>Year built</span>
-            <input style={S.input} type="number" min={1800} max={2026} value={form.yearBuilt} onChange={(e) => set('yearBuilt', e.target.value)} placeholder="e.g. 2005" />
+            <input style={S.input} type="number" min={1800} max={2026} value={form.yearBuilt} onChange={(e) => { set('yearBuilt', e.target.value); setBerSource(null); }} placeholder="e.g. 2005" />
           </label>
+          {berSource && (
+            <div style={{ gridColumn: '1 / -1', fontSize: '0.75rem', color: '#6b7280', marginTop: -4 }}>
+              ℹ BER &amp; year auto-filled from {berSource}. Override by editing above.
+            </div>
+          )}
           <label style={S.field}>
             <span style={S.label}>Buyer type *</span>
             <select style={S.select} value={form.buyerType} onChange={(e) => set('buyerType', e.target.value)}>
@@ -641,7 +703,12 @@ export default function AnalysePage() {
             {result.grants.net_acquisition_cost && (
               <div style={S.execItem}>
                 <span style={S.execLabel}>Effective Cost</span>
-                <span style={S.execValue}>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
+                <span style={S.execValue}>{eur(
+                  Number(form.purchasePrice)
+                  + (result.grants.net_acquisition_cost.stamp_duty ?? Math.round(Number(form.purchasePrice) * 0.01))
+                  + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 2500)
+                  - (result.grants.net_acquisition_cost.total_grants_central ?? 0)
+                )}</span>
                 <span style={S.execSub}>after grants + fees</span>
               </div>
             )}
@@ -653,6 +720,21 @@ export default function AnalysePage() {
               </div>
             )}
           </div>
+
+          {/* Map */}
+          {form.lat && form.lng && (
+            <div style={S.mapWrap}>
+              <Suspense fallback={<div style={{ height: 200, background: '#f5f5f5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.85rem' }}>Loading map...</div>}>
+                <PropertyMap
+                  lat={Number(form.lat)}
+                  lng={Number(form.lng)}
+                  address={form.address}
+                  height={220}
+                  id="property-map"
+                />
+              </Suspense>
+            </div>
+          )}
 
           {/* Report download */}
           <button
@@ -667,8 +749,10 @@ export default function AnalysePage() {
                   purchasePrice: Number(form.purchasePrice),
                   berRating: form.berRating || undefined,
                   yearBuilt: form.yearBuilt || undefined,
+                  bedrooms: form.bedrooms || undefined,
                   buyerType: form.buyerType,
                   intendedUse: form.intendedUse,
+                  location: form.lat && form.lng ? { lat: Number(form.lat), lng: Number(form.lng) } : undefined,
                   result,
                 });
               });
@@ -764,7 +848,12 @@ export default function AnalysePage() {
                       <span>Grants (est.)</span><span>-{eur(result.grants.net_acquisition_cost.total_grants_central)}</span>
                     </div>
                     <div style={{ ...S.costRow, fontWeight: 700, borderTop: '2px solid #e5e5e5', paddingTop: '0.375rem', marginTop: '0.25rem' }}>
-                      <span>Effective cost</span><span>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
+                      <span>Effective cost</span><span>{eur(
+                        (result.grants.net_acquisition_cost.purchase_price ?? Number(form.purchasePrice))
+                        + (result.grants.net_acquisition_cost.stamp_duty ?? 0)
+                        + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 0)
+                        - (result.grants.net_acquisition_cost.total_grants_central ?? 0)
+                      )}</span>
                     </div>
                   </div>
                 )}
@@ -793,7 +882,7 @@ export default function AnalysePage() {
             </div>
 
             {/* 3. Risk Flags */}
-            {(result.radon || result.dcb) && (
+            {(result.radon || result.dcb || result.flood) && (
               <div style={S.dCard}>
                 <div style={S.dCardHead}>
                   <div style={S.dCardIcon}>3</div>
@@ -801,30 +890,59 @@ export default function AnalysePage() {
                     <div style={S.dCardTitle}>Risk Flags</div>
                     <div style={S.dCardHeadline}>
                       {[
-                        result.radon ? `Radon: ${result.radon.riskCategory}` : null,
+                        result.flood ? `Flood: ${result.flood.riskCategory}` : null,
+                        result.radon ? (result.radon.riskCategory === 'unknown' || (result.radon.riskPercent === 0 && result.radon.riskCategory !== 'low') ? 'Radon: unmapped' : `Radon: ${result.radon.riskCategory}`) : null,
                         result.dcb ? `DCB: ${result.dcb.riskLevel}` : null,
                       ].filter(Boolean).join(' · ')}
                     </div>
                   </div>
                   {(() => {
-                    const worst = result.radon?.riskCategory === 'high' || result.dcb?.riskLevel === 'high' ? 'high'
-                      : result.radon?.riskCategory === 'medium' || result.dcb?.riskLevel === 'medium' ? 'medium' : 'low';
+                    const radonUnknown = result.radon?.riskCategory === 'unknown' || (result.radon?.riskPercent === 0 && result.radon?.riskCategory !== 'low');
+                    const worst = result.flood?.riskCategory === 'high' || result.radon?.riskCategory === 'high' || result.dcb?.riskLevel === 'high' ? 'high'
+                      : result.flood?.riskCategory === 'medium' || result.radon?.riskCategory === 'medium' || result.dcb?.riskLevel === 'medium' || radonUnknown ? 'medium' : 'low';
                     return (
                       <div style={{ ...S.confidenceBadge, background: worst === 'high' ? '#fee2e2' : worst === 'medium' ? '#fef9c3' : '#dcfce7', color: worst === 'high' ? '#991b1b' : worst === 'medium' ? '#854d0e' : '#166534' }}>
-                        {worst} risk
+                        {radonUnknown && worst !== 'high' ? 'partial' : worst} risk
                       </div>
                     );
                   })()}
                 </div>
                 <div style={S.dCardBody}>
                   <div style={S.riskGrid}>
+                    {result.flood && (
+                      <div style={S.riskItem}>
+                        <div style={{ ...S.riskBadge, background: riskColor(result.flood.riskCategory === 'none' ? 'low' : result.flood.riskCategory) }}>
+                          {result.flood.inFloodZone ? 'F' : '-'}
+                        </div>
+                        <div>
+                          <div style={S.riskName}>Flood Risk</div>
+                          <div style={S.riskSub}>
+                            {result.flood.inFloodZone
+                              ? `${result.flood.riskCategory} — ${result.flood.zones.length} zone${result.flood.zones.length > 1 ? 's' : ''}`
+                              : 'Not in mapped flood zone'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {result.radon && (
                       <div style={S.riskItem}>
-                        <div style={{ ...S.riskBadge, background: riskColor(result.radon.riskCategory) }}>{result.radon.riskPercent}%</div>
-                        <div>
-                          <div style={S.riskName}>Radon</div>
-                          <div style={S.riskSub}>{result.radon.riskCategory} risk</div>
-                        </div>
+                        {result.radon.riskCategory === 'unknown' || (result.radon.riskPercent === 0 && result.radon.riskCategory !== 'low') ? (
+                          <>
+                            <div style={{ ...S.riskBadge, background: '#d97706' }}>?</div>
+                            <div>
+                              <div style={S.riskName}>Radon</div>
+                              <div style={S.riskSub}>Outside mapped coverage — test recommended</div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ ...S.riskBadge, background: riskColor(result.radon.riskCategory) }}>{result.radon.riskPercent}%</div>
+                            <div>
+                              <div style={S.riskName}>Radon</div>
+                              <div style={S.riskSub}>{result.radon.riskCategory} risk</div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                     {result.dcb && (
@@ -841,15 +959,45 @@ export default function AnalysePage() {
                 <details style={S.expandable}>
                   <summary style={S.expandSummary}>View risk detail and remediation</summary>
                   <div style={S.expandContent}>
+                    {result.flood && (
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Flood Risk (OPW)</div>
+                        <p style={S.cardText}>{result.flood.summary}</p>
+                        <p style={S.cardMuted}>{result.flood.context}</p>
+                        {result.flood.inFloodZone && (
+                          <p style={{ ...S.cardText, color: '#991b1b', fontWeight: 500, marginTop: '0.5rem' }}>{result.flood.recommendation}</p>
+                        )}
+                        {result.flood.zones.length > 0 && (
+                          <div style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: '#666' }}>
+                            {result.flood.zones.map((z, i) => (
+                              <div key={i}>
+                                {z.source} · 1-in-{z.returnPeriod} year · {z.dataset.toUpperCase()}{z.studyName ? ` (${z.studyName})` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {result.radon && (
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Radon</div>
-                        <p style={S.cardText}>{result.radon.riskDescription}</p>
-                        <p style={S.cardMuted}>{result.radon.context}</p>
-                        <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#555', marginTop: '0.5rem' }}>
-                          <span>Test cost: {result.radon.testCost}</span>
-                          <span>Remediation: {result.radon.remediationCost}</span>
-                        </div>
+                        {result.radon.riskCategory === 'unknown' || (result.radon.riskPercent === 0 && result.radon.riskCategory !== 'low') ? (
+                          <>
+                            <p style={S.cardText}>This property is outside EPA radon mapping coverage. The risk level is unknown, not confirmed low. An in-home radon test is recommended before purchase.</p>
+                            <div style={{ fontSize: '0.8rem', color: '#555', marginTop: '0.5rem' }}>
+                              <span>Test cost: {result.radon.testCost}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <p style={S.cardText}>{result.radon.riskDescription}</p>
+                            <p style={S.cardMuted}>{result.radon.context}</p>
+                            <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8rem', color: '#555', marginTop: '0.5rem' }}>
+                              <span>Test cost: {result.radon.testCost}</span>
+                              <span>Remediation: {result.radon.remediationCost}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                     {result.dcb && (
@@ -1167,6 +1315,9 @@ const S: Record<string, React.CSSProperties> = {
   execLabel: { fontSize: '0.65rem', fontWeight: 600, color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.04em' },
   execValue: { fontSize: '1.35rem', fontWeight: 800, color: '#1a1a1a', marginTop: '0.125rem' },
   execSub: { fontSize: '0.7rem', color: '#aaa', marginTop: '0.125rem' },
+
+  // Map
+  mapWrap: { marginBottom: '1rem' },
 
   // Report button
   reportBtn: {

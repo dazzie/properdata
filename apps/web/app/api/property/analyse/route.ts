@@ -9,11 +9,13 @@ import {
   getSolarPotential,
   getWalkabilityScore,
   getDcbRisk,
+  getFloodRisk,
   type ComparableTarget,
   type RadonRiskResult,
   type SolarPotentialResult,
   type WalkabilityResult,
   type DcbRiskResult,
+  type FloodRiskResult,
 } from '@properdata/db';
 import {
   comparableAnalysis,
@@ -55,6 +57,7 @@ interface AnalyseResponse {
   solar?: SolarPotentialResult;
   walkability?: WalkabilityResult;
   dcb?: DcbRiskResult;
+  flood?: FloodRiskResult;
   metadata: {
     elapsedMs: number;
     agentCalls: number;
@@ -252,6 +255,9 @@ export async function POST(request: NextRequest) {
         ? getWalkabilityScore({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
         : Promise.resolve(null),
       dcb: Promise.resolve(getDcbRisk({ county: req.county, yearBuilt: req.yearBuilt })),
+      flood: hasLocation
+        ? getFloodRisk({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
+        : Promise.resolve(null),
     };
 
     const [
@@ -260,12 +266,14 @@ export async function POST(request: NextRequest) {
       solarResult,
       walkabilityResult,
       dcbResult,
+      floodResult,
     ] = await Promise.all([
       Promise.all(agentPromises),
       enrichmentPromises.radon,
       enrichmentPromises.solar,
       enrichmentPromises.walkability,
       enrichmentPromises.dcb,
+      enrichmentPromises.flood,
     ]);
 
     const agentCalls = yieldResult ? 3 : 2;
@@ -278,6 +286,7 @@ export async function POST(request: NextRequest) {
       ...(solarResult ? { solar: solarResult } : {}),
       ...(walkabilityResult ? { walkability: walkabilityResult } : {}),
       ...(dcbResult.riskLevel !== 'none' ? { dcb: dcbResult } : {}),
+      ...(floodResult ? { flood: floodResult } : {}),
       metadata: {
         elapsedMs: Date.now() - start,
         agentCalls,

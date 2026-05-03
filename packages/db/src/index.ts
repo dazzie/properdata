@@ -49,3 +49,12 @@ export {
   getDcbRisk,
   type DcbRiskResult,
 } from './queries/dcb-risk';
+export {
+  getFloodRisk,
+  type FloodRiskResult,
+  type FloodZoneHit,
+} from './queries/flood-risk';
+export {
+  lookupBerByRoutingKey,
+  type BerLookupResult,
+} from './queries/ber-lookup';

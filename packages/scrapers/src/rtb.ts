@@ -60,7 +60,7 @@ export async function downloadRtbCsv(): Promise<string> {
 
 function normaliseCounty(raw: string): string {
   let c = raw.trim();
-  c = c.replace(/^Co\.?\s*/i, '');
+  c = c.replace(/^Co\.\s*/i, '');
   c = c
     .toLowerCase()
     .split(/\s+/)
