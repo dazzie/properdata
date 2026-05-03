@@ -46,6 +46,10 @@ postgres-data/
 # Generated files
 packages/db/migrations/meta/_journal.json.local
 
+# Scripts (temp state and generated output)
+scripts/.batch-state.json
+scripts/output/
+
 # Misc
 .cache/
 *.pem

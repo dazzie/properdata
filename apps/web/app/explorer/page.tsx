@@ -578,7 +578,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   queryCard: {
     background: '#fff',
-    border: '1px solid #e0e0e0',
+    borderWidth: '1px',
+    borderStyle: 'solid' as const,
+    borderColor: '#e0e0e0',
     borderRadius: '8px',
     padding: '1rem',
     cursor: 'pointer',

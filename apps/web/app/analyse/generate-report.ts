@@ -111,6 +111,35 @@ interface FloodResult {
   recommendation: string;
 }
 
+interface NoiseResult {
+  hasData: boolean;
+  ldenMax: number | null;
+  lnightMax: number | null;
+  category: string;
+  exposures: Array<{ source: string; timeIndicator: string; dbRange: string; dbLow: number; sourceType: string }>;
+  summary: string;
+  context: string;
+  whoGuidance: string;
+}
+
+interface AirQualityResult {
+  station: { name: string; code: string; distanceKm: number };
+  aqih: number | null;
+  aqihLabel: string;
+  avg24h: { pm25: number | null; pm10: number | null };
+  summary: string;
+  context: string;
+  healthAdvice: string;
+}
+
+interface MicroclimateResult {
+  station: { name: string; distanceKm: number; height: number };
+  normals: { meanTemp: number; rainfall: number; sunHours: number | null; windSpeed: number | null; frostDays: number | null };
+  summary: string;
+  context: string;
+  retrofitNote: string;
+}
+
 interface AnalyseResponse {
   comparable: ComparableResult;
   grants: GrantResult;
@@ -120,6 +149,9 @@ interface AnalyseResponse {
   walkability?: WalkabilityResult;
   dcb?: DcbResult;
   flood?: FloodResult;
+  noise?: NoiseResult;
+  airQuality?: AirQualityResult;
+  microclimate?: MicroclimateResult;
   metadata: { elapsedMs: number; agentCalls: number; estimatedCost: number; from_cache: boolean };
 }
 
@@ -689,6 +721,18 @@ export async function generateReport(input: ReportInput): Promise<void> {
   if (result.dcb && result.dcb.riskLevel !== 'none') {
     summaryPoints.push(`Defective blocks: ${result.dcb.riskLevel} risk.${result.dcb.grantEligible ? ' May qualify for remediation grant.' : ''}`);
   }
+  // Noise
+  if (result.noise?.hasData) {
+    summaryPoints.push(`Noise: ${result.noise.category} (${result.noise.ldenMax ? `${result.noise.ldenMax}+ dB Lden` : 'below threshold'}).`);
+  }
+  // Air quality
+  if (result.airQuality) {
+    summaryPoints.push(`Air quality: AQIH ${result.airQuality.aqih ?? 'N/A'} (${result.airQuality.aqihLabel}) at ${result.airQuality.station.name}.`);
+  }
+  // Microclimate
+  if (result.microclimate) {
+    summaryPoints.push(`Climate: ${result.microclimate.normals.meanTemp}°C avg, ${result.microclimate.normals.rainfall}mm rain, ${result.microclimate.normals.sunHours ?? '?'} sun hrs/yr.`);
+  }
 
   bulletList(summaryPoints);
 
@@ -1059,6 +1103,46 @@ export async function generateReport(input: ReportInput): Promise<void> {
     body('Flood risk has not been assessed in this report. Coordinates are required for the OPW flood map lookup. Check floodinfo.ie before purchase.');
   }
 
+  if (result.noise) {
+    subheading('Noise Exposure');
+    keyValue('Category', result.noise.category.toUpperCase(),
+      result.noise.category === 'high' ? RED : result.noise.category === 'moderate' ? AMBER : GREEN_DARK);
+    if (result.noise.ldenMax != null) keyValue('Lden (day-evening-night)', `${result.noise.ldenMax}+ dB`);
+    if (result.noise.lnightMax != null) keyValue('Lnight (night)', `${result.noise.lnightMax}+ dB`);
+    if (result.noise.exposures.length > 0) {
+      const sources = [...new Set(result.noise.exposures.map((e) => e.sourceType))];
+      keyValue('Sources', sources.join(', '));
+    }
+    y += 1;
+    body(result.noise.summary);
+    body(result.noise.whoGuidance);
+  }
+
+  if (result.airQuality) {
+    subheading('Air Quality');
+    if (result.airQuality.aqih != null) {
+      keyValue('AQIH', `${result.airQuality.aqih} (${result.airQuality.aqihLabel})`,
+        result.airQuality.aqih <= 3 ? GREEN_DARK : result.airQuality.aqih <= 6 ? AMBER : RED);
+    }
+    keyValue('Nearest station', `${result.airQuality.station.name} (${result.airQuality.station.distanceKm}km)`);
+    if (result.airQuality.avg24h.pm25 != null) keyValue('PM2.5 (24h avg)', `${result.airQuality.avg24h.pm25} µg/m³`);
+    if (result.airQuality.avg24h.pm10 != null) keyValue('PM10 (24h avg)', `${result.airQuality.avg24h.pm10} µg/m³`);
+    y += 1;
+    body(result.airQuality.summary);
+  }
+
+  if (result.microclimate) {
+    subheading('Microclimate');
+    keyValue('Station', `${result.microclimate.station.name} (${result.microclimate.station.distanceKm}km, ${result.microclimate.station.height}m elevation)`);
+    keyValue('Mean temperature', `${result.microclimate.normals.meanTemp}°C`);
+    keyValue('Annual rainfall', `${result.microclimate.normals.rainfall}mm`);
+    if (result.microclimate.normals.sunHours != null) keyValue('Sun hours/year', `${result.microclimate.normals.sunHours}`);
+    if (result.microclimate.normals.windSpeed != null) keyValue('Wind speed', `${result.microclimate.normals.windSpeed} km/h`);
+    if (result.microclimate.normals.frostDays != null) keyValue('Frost days/year', `~${result.microclimate.normals.frostDays}`);
+    y += 1;
+    body(result.microclimate.retrofitNote);
+  }
+
   if (!result.radon && !result.dcb) {
     body('Limited environmental risk data available. Provide coordinates to enable radon and location-specific checks.');
   }
@@ -1097,6 +1181,12 @@ export async function generateReport(input: ReportInput): Promise<void> {
   }
   if (result.dcb && (result.dcb.riskLevel === 'high' || result.dcb.riskLevel === 'medium')) {
     flags.push({ flag: 'Defective block risk', severity: result.dcb.riskLevel === 'high' ? 'HIGH' : 'MEDIUM', detail: result.dcb.recommendation });
+  }
+  if (result.noise?.category === 'high') {
+    flags.push({ flag: 'High noise exposure', severity: 'MEDIUM', detail: `${result.noise.ldenMax ?? ''}+ dB Lden from ${[...new Set(result.noise.exposures.map((e) => e.sourceType))].join(', ')}. ${result.noise.whoGuidance}` });
+  }
+  if (result.airQuality && result.airQuality.aqih != null && result.airQuality.aqih >= 7) {
+    flags.push({ flag: 'Poor air quality area', severity: 'MEDIUM', detail: `AQIH ${result.airQuality.aqih} (${result.airQuality.aqihLabel}) at ${result.airQuality.station.name}. ${result.airQuality.healthAdvice}` });
   }
 
   // Yield flags
@@ -1170,6 +1260,8 @@ export async function generateReport(input: ReportInput): Promise<void> {
     { item: 'Review management fees (apartment/duplex)', status: propertyType === 'apartment' || propertyType === 'duplex' ? 'TODO' : 'N/A' },
     { item: 'Confirm RPZ status if buying to let', status: intendedUse === 'rental' || intendedUse === 'mixed' ? 'TODO' : 'N/A' },
     { item: 'Get retrofit assessment before relying on grant economics', status: result.grants.applicable_schemes?.some((s) => s.code?.startsWith('SEAI')) ? 'RECOMMENDED' : 'N/A' },
+    { item: 'Verify noise exposure on-site (EPA noise maps show modelled levels)', status: result.noise?.category === 'high' || result.noise?.category === 'moderate' ? 'RECOMMENDED' : 'OPTIONAL' },
+    { item: 'Check air quality monitoring at airquality.ie', status: result.airQuality && result.airQuality.aqih != null && result.airQuality.aqih >= 7 ? 'RECOMMENDED' : 'OPTIONAL' },
   ];
 
   const activeChecks = checks.filter((c) => c.status !== 'N/A');

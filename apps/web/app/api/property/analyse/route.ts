@@ -10,12 +10,18 @@ import {
   getWalkabilityScore,
   getDcbRisk,
   getFloodRisk,
+  getNoiseExposure,
+  getAirQuality,
+  getMicroclimate,
   type ComparableTarget,
   type RadonRiskResult,
   type SolarPotentialResult,
   type WalkabilityResult,
   type DcbRiskResult,
   type FloodRiskResult,
+  type NoiseResult,
+  type AirQualityResult,
+  type MicroclimateResult,
 } from '@properdata/db';
 import {
   comparableAnalysis,
@@ -58,6 +64,9 @@ interface AnalyseResponse {
   walkability?: WalkabilityResult;
   dcb?: DcbRiskResult;
   flood?: FloodRiskResult;
+  noise?: NoiseResult;
+  airQuality?: AirQualityResult;
+  microclimate?: MicroclimateResult;
   metadata: {
     elapsedMs: number;
     agentCalls: number;
@@ -244,20 +253,17 @@ export async function POST(request: NextRequest) {
     // Run enrichment queries in parallel with agent calls
     const hasLocation = req.location?.lat && req.location?.lng;
 
+    const loc = hasLocation ? { lat: req.location!.lat, lng: req.location!.lng } : null;
+
     const enrichmentPromises = {
-      radon: hasLocation
-        ? getRadonRisk({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
-        : Promise.resolve(null),
-      solar: hasLocation
-        ? getSolarPotential({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
-        : Promise.resolve(null),
-      walkability: hasLocation
-        ? getWalkabilityScore({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
-        : Promise.resolve(null),
+      radon: loc ? getRadonRisk(loc).catch(() => null) : Promise.resolve(null),
+      solar: loc ? getSolarPotential(loc).catch(() => null) : Promise.resolve(null),
+      walkability: loc ? getWalkabilityScore(loc).catch(() => null) : Promise.resolve(null),
       dcb: Promise.resolve(getDcbRisk({ county: req.county, yearBuilt: req.yearBuilt })),
-      flood: hasLocation
-        ? getFloodRisk({ lat: req.location!.lat, lng: req.location!.lng }).catch(() => null)
-        : Promise.resolve(null),
+      flood: loc ? getFloodRisk(loc).catch(() => null) : Promise.resolve(null),
+      noise: loc ? getNoiseExposure(loc).catch(() => null) : Promise.resolve(null),
+      airQuality: loc ? getAirQuality(loc).catch(() => null) : Promise.resolve(null),
+      microclimate: loc ? getMicroclimate(loc).catch(() => null) : Promise.resolve(null),
     };
 
     const [
@@ -267,6 +273,9 @@ export async function POST(request: NextRequest) {
       walkabilityResult,
       dcbResult,
       floodResult,
+      noiseResult,
+      airQualityResult,
+      microclimateResult,
     ] = await Promise.all([
       Promise.all(agentPromises),
       enrichmentPromises.radon,
@@ -274,6 +283,9 @@ export async function POST(request: NextRequest) {
       enrichmentPromises.walkability,
       enrichmentPromises.dcb,
       enrichmentPromises.flood,
+      enrichmentPromises.noise,
+      enrichmentPromises.airQuality,
+      enrichmentPromises.microclimate,
     ]);
 
     const agentCalls = yieldResult ? 3 : 2;
@@ -287,6 +299,9 @@ export async function POST(request: NextRequest) {
       ...(walkabilityResult ? { walkability: walkabilityResult } : {}),
       ...(dcbResult.riskLevel !== 'none' ? { dcb: dcbResult } : {}),
       ...(floodResult ? { flood: floodResult } : {}),
+      ...(noiseResult?.hasData ? { noise: noiseResult } : {}),
+      ...(airQualityResult ? { airQuality: airQualityResult } : {}),
+      ...(microclimateResult ? { microclimate: microclimateResult } : {}),
       metadata: {
         elapsedMs: Date.now() - start,
         agentCalls,

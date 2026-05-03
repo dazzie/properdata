@@ -2,9 +2,9 @@
 
 The running to-do list. Top of the file is highest priority. Tasks are checked `[x]` when complete and `[blocked]` with a reason when stuck.
 
-**Now working on:** Sprint 5 — UX Novelty: Radon, Solar, Mica, Walkability
+**Now working on:** Sprint 5 — UX Novelty: Tier 2 (Noise, Air Quality, Microclimate)
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-03
 
 ---
 
@@ -95,9 +95,9 @@ See `.claude/sprints/sprint-5-ux-novelty.md`.
 - [x] 5.5 — Wire all four into `/api/property/analyse` endpoint
 
 **Tier 2 (lifestyle):**
-- [ ] 5.5 — EPA Strategic Noise Maps integration
-- [ ] 5.6 — EPA Air Quality monitoring station data
-- [ ] 5.7 — Met Éireann microclimate normals
+- [x] 5.5 — EPA Strategic Noise Maps integration
+- [x] 5.6 — EPA Air Quality monitoring station data
+- [x] 5.7 — Met Éireann microclimate normals
 
 **Tier 3 (investor / pro):**
 - [ ] 5.8 — TII traffic counts integration

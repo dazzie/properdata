@@ -124,6 +124,65 @@ interface FloodResult {
   recommendation: string;
 }
 
+interface NoiseExposure {
+  source: string;
+  timeIndicator: string;
+  dbRange: string;
+  dbLow: number;
+  dbHigh: number | null;
+  sourceType: string;
+}
+
+interface NoiseResult {
+  hasData: boolean;
+  ldenMax: number | null;
+  lnightMax: number | null;
+  category: string;
+  exposures: NoiseExposure[];
+  summary: string;
+  context: string;
+  whoGuidance: string;
+}
+
+interface AirQualityResult {
+  station: { name: string; code: string; distanceKm: number };
+  aqih: number | null;
+  aqihLabel: string;
+  currentReading: {
+    pm25: number | null;
+    pm10: number | null;
+    no2: number | null;
+    o3: number | null;
+    so2: number | null;
+    recordedAt: string;
+  } | null;
+  avg24h: { pm25: number | null; pm10: number | null };
+  modelledZone: { pm25Range: string | null; pm10Range: string | null; no2Range: string | null };
+  summary: string;
+  context: string;
+  healthAdvice: string;
+}
+
+interface MicroclimateResult {
+  station: { name: string; distanceKm: number; height: number };
+  normals: {
+    meanTemp: number;
+    rainfall: number;
+    sunHours: number | null;
+    windSpeed: number | null;
+    frostDays: number | null;
+  };
+  nationalComparison: {
+    tempVsNational: string;
+    rainfallVsNational: string;
+    sunVsNational: string | null;
+    windVsNational: string | null;
+  };
+  summary: string;
+  context: string;
+  retrofitNote: string;
+}
+
 interface AnalyseResponse {
   comparable: ComparableResult;
   grants: GrantResult;
@@ -133,6 +192,9 @@ interface AnalyseResponse {
   walkability?: WalkabilityResult;
   dcb?: DcbResult;
   flood?: FloodResult;
+  noise?: NoiseResult;
+  airQuality?: AirQualityResult;
+  microclimate?: MicroclimateResult;
   metadata: {
     elapsedMs: number;
     agentCalls: number;
@@ -1126,11 +1188,131 @@ export default function AnalysePage() {
               </div>
             )}
 
-            {/* 6. Rental Yield (conditional) */}
-            {result.yield && (
+            {/* 6. Environment (noise, air quality, microclimate) */}
+            {(result.noise || result.airQuality || result.microclimate) && (
               <div style={S.dCard}>
                 <div style={S.dCardHead}>
                   <div style={S.dCardIcon}>6</div>
+                  <div>
+                    <div style={S.dCardTitle}>Environment</div>
+                    <div style={S.dCardHeadline}>
+                      {[
+                        result.noise ? `Noise: ${result.noise.category}` : null,
+                        result.airQuality ? `Air: AQIH ${result.airQuality.aqih ?? '?'} (${result.airQuality.aqihLabel})` : null,
+                        result.microclimate ? `${result.microclimate.normals.meanTemp}°C avg` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  {result.noise && (
+                    <div style={{
+                      ...S.confidenceBadge,
+                      background: result.noise.category === 'high' ? '#fee2e2' : result.noise.category === 'moderate' ? '#fef9c3' : '#dcfce7',
+                      color: result.noise.category === 'high' ? '#991b1b' : result.noise.category === 'moderate' ? '#854d0e' : '#166534',
+                    }}>
+                      {result.noise.ldenMax ? `${result.noise.ldenMax}+ dB` : result.noise.category}
+                    </div>
+                  )}
+                </div>
+                <div style={S.dCardBody}>
+                  <div style={S.riskGrid}>
+                    {result.noise && (
+                      <div style={S.riskItem}>
+                        <div style={{ ...S.riskBadge, background: result.noise.category === 'high' ? '#dc2626' : result.noise.category === 'moderate' ? '#d97706' : '#16a34a' }}>
+                          {result.noise.ldenMax ? `${result.noise.ldenMax}` : 'Q'}
+                        </div>
+                        <div>
+                          <div style={S.riskName}>Noise Level</div>
+                          <div style={S.riskSub}>
+                            {result.noise.hasData
+                              ? `${result.noise.category} — ${[...new Set(result.noise.exposures.map((e) => e.source))].join(', ')}`
+                              : 'Below mapped threshold'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {result.airQuality && (
+                      <div style={S.riskItem}>
+                        <div style={{
+                          ...S.riskBadge,
+                          background: (result.airQuality.aqih ?? 0) <= 3 ? '#16a34a' : (result.airQuality.aqih ?? 0) <= 6 ? '#d97706' : '#dc2626',
+                        }}>
+                          {result.airQuality.aqih ?? '?'}
+                        </div>
+                        <div>
+                          <div style={S.riskName}>Air Quality</div>
+                          <div style={S.riskSub}>
+                            {result.airQuality.aqihLabel} — {result.airQuality.station.name} ({result.airQuality.station.distanceKm}km)
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {result.microclimate && (
+                      <div style={S.riskItem}>
+                        <div style={{ ...S.riskBadge, background: '#3b82f6' }}>
+                          {result.microclimate.normals.meanTemp}°
+                        </div>
+                        <div>
+                          <div style={S.riskName}>Microclimate</div>
+                          <div style={S.riskSub}>
+                            {result.microclimate.normals.rainfall}mm rain · {result.microclimate.normals.sunHours ?? '?'} sun hrs
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <details style={S.expandable}>
+                  <summary style={S.expandSummary}>View environment detail</summary>
+                  <div style={S.expandContent}>
+                    {result.noise && (
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Strategic Noise Map (EPA)</div>
+                        <p style={S.cardText}>{result.noise.summary}</p>
+                        <p style={S.cardMuted}>{result.noise.whoGuidance}</p>
+                        {result.noise.exposures.length > 0 && (
+                          <div style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: '#666' }}>
+                            {result.noise.exposures
+                              .filter((e) => e.timeIndicator === 'Lden')
+                              .map((e, i) => (
+                                <div key={i}>{e.sourceType} · {e.dbRange} · {e.timeIndicator}</div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {result.airQuality && (
+                      <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Air Quality (EPA)</div>
+                        <p style={S.cardText}>{result.airQuality.summary}</p>
+                        <p style={S.cardMuted}>{result.airQuality.healthAdvice}</p>
+                        {result.airQuality.currentReading && (
+                          <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.78rem', color: '#666', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                            {result.airQuality.currentReading.pm25 != null && <span>PM2.5: {result.airQuality.currentReading.pm25} µg/m³</span>}
+                            {result.airQuality.currentReading.pm10 != null && <span>PM10: {result.airQuality.currentReading.pm10} µg/m³</span>}
+                            {result.airQuality.currentReading.no2 != null && <span>NO₂: {result.airQuality.currentReading.no2} µg/m³</span>}
+                            {result.airQuality.currentReading.o3 != null && <span>O₃: {result.airQuality.currentReading.o3} µg/m³</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {result.microclimate && (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '0.25rem' }}>Microclimate (Met Éireann)</div>
+                        <p style={S.cardText}>{result.microclimate.summary}</p>
+                        <p style={{ ...S.cardText, color: '#1d4ed8', fontStyle: 'italic', marginTop: '0.5rem' }}>{result.microclimate.retrofitNote}</p>
+                        <p style={S.cardMuted}>{result.microclimate.context}</p>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
+
+            {/* 7. Rental Yield (conditional) */}
+            {result.yield && (
+              <div style={S.dCard}>
+                <div style={S.dCardHead}>
+                  <div style={S.dCardIcon}>7</div>
                   <div>
                     <div style={S.dCardTitle}>Rental Yield</div>
                     <div style={S.dCardHeadline}>

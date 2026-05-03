@@ -58,3 +58,19 @@ export {
   lookupBerByRoutingKey,
   type BerLookupResult,
 } from './queries/ber-lookup';
+export {
+  getNoiseExposure,
+  type NoiseResult,
+  type NoiseExposure,
+} from './queries/noise';
+export {
+  getAirQuality,
+  type AirQualityResult,
+  type AirQualityStation,
+  type AirQualityReading,
+} from './queries/air-quality';
+export {
+  getMicroclimate,
+  type MicroclimateResult,
+  type ClimateNormals,
+} from './queries/microclimate';

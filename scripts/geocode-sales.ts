@@ -12,7 +12,7 @@
  */
 
 import { db, sales } from '../packages/db/src';
-import { sql, isNull, desc, gte } from 'drizzle-orm';
+import { sql, desc } from 'drizzle-orm';
 
 const args = process.argv.slice(2);
 const limitIdx = args.indexOf('--limit');
@@ -27,43 +27,72 @@ interface NominatimResult {
   display_name: string;
 }
 
+const MAX_RETRIES = 3;
+const BASE_BACKOFF_MS = 2000;
+
+async function fetchWithRetry(url: string, attempt = 0): Promise<NominatimResult[]> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'ProperData/1.0 (property-research, moran.daragh@gmail.com)' },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (res.status === 429 || res.status >= 500) {
+      if (attempt < MAX_RETRIES) {
+        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt);
+        console.log(`    HTTP ${res.status} — retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(backoff);
+        return fetchWithRetry(url, attempt + 1);
+      }
+      console.log(`    HTTP ${res.status} — exhausted retries`);
+      return [];
+    }
+
+    if (!res.ok) return [];
+    return (await res.json()) as NominatimResult[];
+  } catch (err) {
+    if (attempt < MAX_RETRIES) {
+      const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      console.log(`    Network error (${msg}) — retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await sleep(backoff);
+      return fetchWithRetry(url, attempt + 1);
+    }
+    return [];
+  }
+}
+
 async function geocode(address: string, county: string): Promise<{ lat: number; lng: number } | null> {
   const queries = [
     `${address}, ${county}, Ireland`,
     `${address.replace(/^\d+\s*/, '')}, ${county}, Ireland`,
   ];
 
-  // Extract town from address for fallback
   const parts = address.split(',').map((s) => s.trim());
   if (parts.length >= 2) {
     const town = parts.find((p) => !p.match(/^\d/) && !p.match(/^Co\.?\s/i));
     if (town) queries.push(`${town}, ${county}, Ireland`);
   }
 
-  for (const q of queries) {
-    try {
-      const params = new URLSearchParams({
-        q,
-        format: 'json',
-        limit: '1',
-        countrycodes: 'ie',
-      });
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-        headers: { 'User-Agent': 'ProperData/1.0 (property-research, moran.daragh@gmail.com)' },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!res.ok) continue;
+  for (let i = 0; i < queries.length; i++) {
+    if (i > 0) await sleep(DELAY_MS);
 
-      const results = (await res.json()) as NominatimResult[];
-      if (results.length > 0 && results[0]) {
-        const lat = parseFloat(results[0].lat);
-        const lng = parseFloat(results[0].lon);
-        if (!isNaN(lat) && !isNaN(lng) && lat > 51 && lat < 56 && lng > -11 && lng < -5.5) {
-          return { lat, lng };
-        }
+    const params = new URLSearchParams({
+      q: queries[i]!,
+      format: 'json',
+      limit: '1',
+      countrycodes: 'ie',
+    });
+    const results = await fetchWithRetry(
+      `https://nominatim.openstreetmap.org/search?${params}`,
+    );
+
+    if (results.length > 0 && results[0]) {
+      const lat = parseFloat(results[0].lat);
+      const lng = parseFloat(results[0].lon);
+      if (!isNaN(lat) && !isNaN(lng) && lat > 51 && lat < 56 && lng > -11 && lng < -5.5) {
+        return { lat, lng };
       }
-    } catch {
-      // timeout or network error — skip this query variant
     }
   }
   return null;
@@ -91,6 +120,11 @@ async function main() {
     .limit(LIMIT);
 
   console.log(`Found ${rows.length} un-geocoded sales to process\n`);
+
+  if (rows.length === 0) {
+    console.log('Nothing to do.');
+    return;
+  }
 
   let geocoded = 0;
   let failed = 0;
@@ -125,11 +159,12 @@ async function main() {
 
     if ((i + 1) % 100 === 0) {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const rate = geocoded / (elapsed / 60);
-      const remaining = rows.length - i - 1;
-      const eta = Math.round(remaining / (rate / 60));
+      const processed = i + 1;
+      const remaining = rows.length - processed;
+      const secPerRecord = elapsed / processed;
+      const eta = Math.round(remaining * secPerRecord);
       console.log(
-        `  ${i + 1}/${rows.length} — geocoded: ${geocoded}, failed: ${failed}, eircode hits: ${eircodeHits} ` +
+        `  ${processed}/${rows.length} — geocoded: ${geocoded}, failed: ${failed}, eircode hits: ${eircodeHits} ` +
         `(${elapsed}s elapsed, ~${eta}s remaining)`,
       );
     }
