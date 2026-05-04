@@ -319,6 +319,49 @@ describe('POST /api/property/analyse', () => {
     );
   });
 
+  it('overrides agent stamp duty with server-side calculation', async () => {
+    mockGrantCalculator.mockResolvedValue({
+      ...FIXTURE_GRANT_RESULT,
+      net_acquisition_cost: {
+        ...FIXTURE_GRANT_RESULT.net_acquisition_cost,
+        stamp_duty: 99999,
+        effective_cost: 999999,
+      },
+    });
+
+    const res = await POST(makeRequest(BASE_BODY));
+    const json = await res.json();
+    const nac = json.grants.net_acquisition_cost;
+
+    expect(nac.stamp_duty).toBe(3100);
+    expect(nac.stamp_duty).not.toBe(99999);
+    expect(nac.effective_cost).toBe(
+      nac.purchase_price + nac.stamp_duty + nac.estimated_legal_fees - nac.total_grants_central,
+    );
+  });
+
+  it('computes 2% stamp duty above €1M', async () => {
+    const body = { ...BASE_BODY, purchasePrice: 1_200_000 };
+    const res = await POST(makeRequest(body));
+    const json = await res.json();
+    const nac = json.grants.net_acquisition_cost;
+
+    expect(nac.stamp_duty).toBe(14000);
+    expect(nac.purchase_price).toBe(1_200_000);
+    expect(nac.effective_cost).toBe(
+      nac.purchase_price + nac.stamp_duty + nac.estimated_legal_fees - nac.total_grants_central,
+    );
+  });
+
+  it('preserves agent legal fees and central grant estimate', async () => {
+    const res = await POST(makeRequest(BASE_BODY));
+    const json = await res.json();
+    const nac = json.grants.net_acquisition_cost;
+
+    expect(nac.estimated_legal_fees).toBe(FIXTURE_GRANT_RESULT.net_acquisition_cost.estimated_legal_fees);
+    expect(nac.total_grants_central).toBe(FIXTURE_GRANT_RESULT.net_acquisition_cost.total_grants_central);
+  });
+
   // -------------------------------------------------------------------------
   // Investor flow (all three agents)
   // -------------------------------------------------------------------------
