@@ -129,7 +129,7 @@ async function fetchNormals(station: StationMeta): Promise<ClimateNormals> {
 
   const yearlyData = new Map<
     number,
-    { temps: number[]; rains: number[]; suns: number[]; winds: number[]; gmins: number[] }
+    { temps: number[]; rains: number[]; suns: number[]; winds: number[]; mnmins: number[] }
   >();
 
   for (let i = dataStartIdx; i < lines.length; i++) {
@@ -143,12 +143,12 @@ async function fetchNormals(station: StationMeta): Promise<ClimateNormals> {
 
     const meant = parseFloat(cols[2]!);
     const rain = parseFloat(cols[7]!);
-    const gmin = cols.length > 8 ? parseFloat(cols[8]!) : NaN;
+    const mnmin = cols.length > 6 ? parseFloat(cols[6]!) : NaN;
     const wdsp = cols.length > 9 ? parseFloat(cols[9]!) : NaN;
     const sun = cols.length > 11 ? parseFloat(cols[11]!) : NaN;
 
     if (!yearlyData.has(year)) {
-      yearlyData.set(year, { temps: [], rains: [], suns: [], winds: [], gmins: [] });
+      yearlyData.set(year, { temps: [], rains: [], suns: [], winds: [], mnmins: [] });
     }
     const d = yearlyData.get(year)!;
 
@@ -156,24 +156,36 @@ async function fetchNormals(station: StationMeta): Promise<ClimateNormals> {
     if (!isNaN(rain)) d.rains.push(rain);
     if (!isNaN(sun)) d.suns.push(sun);
     if (!isNaN(wdsp)) d.winds.push(wdsp);
-    if (!isNaN(gmin)) d.gmins.push(gmin);
+    if (!isNaN(mnmin)) d.mnmins.push(mnmin);
   }
 
   const allTemps: number[] = [];
   const allRains: number[] = [];
   const allSuns: number[] = [];
   const allWinds: number[] = [];
-  let totalFrostMonths = 0;
-  let frostMonthCount = 0;
+  let totalEstFrostDays = 0;
+  let yearCount = 0;
 
   for (const [, d] of yearlyData) {
     if (d.temps.length >= 10) allTemps.push(d.temps.reduce((a, b) => a + b, 0) / d.temps.length);
     if (d.rains.length >= 10) allRains.push(d.rains.reduce((a, b) => a + b, 0));
     if (d.suns.length >= 10) allSuns.push(d.suns.reduce((a, b) => a + b, 0));
     if (d.winds.length >= 10) allWinds.push(d.winds.reduce((a, b) => a + b, 0) / d.winds.length);
-    for (const g of d.gmins) {
-      frostMonthCount++;
-      if (g < 0) totalFrostMonths++;
+    if (d.mnmins.length >= 10) {
+      yearCount++;
+      for (const mnmin of d.mnmins) {
+        // Estimate air frost days from mean daily minimum temperature.
+        // Based on normal distribution of daily temps around monthly mean
+        // (σ ≈ 3°C for Irish climate). Calibrated against Met Éireann
+        // published 30-year frost day averages.
+        if (mnmin <= -2) totalEstFrostDays += 20;
+        else if (mnmin <= 0) totalEstFrostDays += 14;
+        else if (mnmin <= 1) totalEstFrostDays += 10;
+        else if (mnmin <= 2) totalEstFrostDays += 7;
+        else if (mnmin <= 3) totalEstFrostDays += 4;
+        else if (mnmin <= 4) totalEstFrostDays += 2;
+        else if (mnmin <= 5) totalEstFrostDays += 1;
+      }
     }
   }
 
@@ -185,9 +197,7 @@ async function fetchNormals(station: StationMeta): Promise<ClimateNormals> {
   const windSpeedKnots = avg(allWinds);
   // Convert knots to km/h
   const windSpeed = windSpeedKnots != null ? Math.round(windSpeedKnots * 1.852 * 10) / 10 : null;
-  // Approximate frost days: months with gmin < 0 → estimate days
-  const frostDays =
-    frostMonthCount > 0 ? Math.round((totalFrostMonths / frostMonthCount) * 365) : null;
+  const frostDays = yearCount > 0 ? Math.round(totalEstFrostDays / yearCount) : null;
 
   const normals: ClimateNormals = {
     meanTemp: meanTemp != null ? Math.round(meanTemp * 10) / 10 : NATIONAL_AVG.meanTemp,

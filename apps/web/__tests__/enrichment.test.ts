@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // 1. DCB Risk — pure logic, no external deps
@@ -516,5 +516,371 @@ describe('getWalkabilityScore (mocked)', () => {
 
     expect(result.summary).toContain('Within 1.5km');
     expect(result.summary).toContain('supermarket');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Noise exposure — mocked EPA WFS response
+// ---------------------------------------------------------------------------
+
+describe('getNoiseExposure (mocked)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  const emptyWfs = () => ({ ok: true, json: async () => ({ features: [] }) });
+
+  const noiseFeature = (dbValue: string, type: string) => ({
+    ok: true,
+    json: async () => ({
+      features: [{ properties: { dB_Value: dbValue, Type: type } }],
+    }),
+  });
+
+  it('returns quiet when no layers intersect', async () => {
+    mockFetch.mockResolvedValue(emptyWfs());
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.5, lng: -7.3 });
+
+    expect(result.hasData).toBe(false);
+    expect(result.category).toBe('quiet');
+    expect(result.ldenMax).toBeNull();
+    expect(result.lnightMax).toBeNull();
+    expect(result.exposures).toHaveLength(0);
+    expect(result.summary).toContain('outside the mapped');
+  });
+
+  it('categorises moderate road noise correctly', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('Road_National_Lden')) return noiseFeature('65-69dB', 'Motorway');
+      return emptyWfs();
+    });
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.35, lng: -6.26 });
+
+    expect(result.hasData).toBe(true);
+    expect(result.category).toBe('moderate');
+    expect(result.ldenMax).toBe(65);
+    expect(result.exposures).toHaveLength(1);
+    expect(result.exposures[0]!.source).toBe('road');
+    expect(result.exposures[0]!.dbRange).toBe('65-69dB');
+  });
+
+  it('categorises high noise from multiple sources', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('Road_National_Lden')) return noiseFeature('70-74dB', 'National Road');
+      if (u.includes('Rail_National_Lnight')) return noiseFeature('55-59dB', 'Railway');
+      return emptyWfs();
+    });
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.35, lng: -6.26 });
+
+    expect(result.hasData).toBe(true);
+    expect(result.category).toBe('high');
+    expect(result.ldenMax).toBe(70);
+    expect(result.lnightMax).toBe(55);
+    expect(result.exposures).toHaveLength(2);
+  });
+
+  it('parses >75dB format correctly', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('Road_Agglomerations_Lden')) return noiseFeature('>75dB', 'Major Road');
+      return emptyWfs();
+    });
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.35, lng: -6.26 });
+
+    expect(result.ldenMax).toBe(75);
+    expect(result.exposures[0]!.dbHigh).toBeNull();
+    expect(result.category).toBe('high');
+  });
+
+  it('generates WHO guidance for exceeded thresholds', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('Road_National_Lden')) return noiseFeature('65-69dB', 'Road');
+      if (u.includes('Road_National_Lnight')) return noiseFeature('50-54dB', 'Road');
+      return emptyWfs();
+    });
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.35, lng: -6.26 });
+
+    expect(result.whoGuidance).toContain('WHO');
+    expect(result.whoGuidance).toContain('53 dB Lden');
+    expect(result.whoGuidance).toContain('40 dB Lnight');
+  });
+
+  it('within WHO guidelines when below thresholds', async () => {
+    mockFetch.mockResolvedValue(emptyWfs());
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.5, lng: -7.3 });
+
+    expect(result.whoGuidance).toContain('within WHO recommended guidelines');
+  });
+
+  it('degrades gracefully on complete service failure', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'));
+    const { getNoiseExposure } = await import('../../../packages/db/src/queries/noise');
+    const result = await getNoiseExposure({ lat: 53.5, lng: -7.3 });
+
+    expect(result.hasData).toBe(false);
+    expect(result.category).toBe('quiet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Air quality — mocked airquality.ie + EPA WFS response
+// ---------------------------------------------------------------------------
+
+describe('getAirQuality (mocked)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  const makeMonitors = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    json: async () => [
+      {
+        monitor_id: 1,
+        label: 'Dublin Rathmines',
+        location: 'Rathmines',
+        latitude: '53.327',
+        longitude: '-6.263',
+        code: 'RATH',
+        current_rating: '2',
+        latest_reading: {
+          recorded_at: '2026-05-03T10:00:00Z',
+          pm2_5: 8,
+          pm10: 15,
+          no2: 20,
+          o3: 40,
+          so2: 2,
+        },
+        latest_averages: {
+          pm2_5: { value: 10 },
+          pm10: { value: 18 },
+        },
+        ...overrides,
+      },
+    ],
+  });
+
+  const emptyWfs = () => ({ ok: true, json: async () => ({ features: [] }) });
+
+  const wfsZone = (range: string) => ({
+    ok: true,
+    json: async () => ({
+      features: [{ properties: { Range: range } }],
+    }),
+  });
+
+  it('returns good air quality result', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors')) return makeMonitors({ current_rating: '2' });
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result).not.toBeNull();
+    expect(result!.aqih).toBe(2);
+    expect(result!.aqihLabel).toBe('Good');
+    expect(result!.station.name).toBe('Rathmines');
+    expect(result!.healthAdvice).toContain('good');
+  });
+
+  it('returns fair air quality for AQIH 5', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors')) return makeMonitors({ current_rating: '5' });
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.aqih).toBe(5);
+    expect(result!.aqihLabel).toBe('Fair');
+    expect(result!.healthAdvice).toContain('sensitive');
+  });
+
+  it('returns poor air quality for AQIH 8', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors')) return makeMonitors({ current_rating: '8' });
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.aqih).toBe(8);
+    expect(result!.aqihLabel).toBe('Poor');
+    expect(result!.healthAdvice).toContain('respiratory');
+  });
+
+  it('includes modelled zone data when available', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors')) return makeMonitors();
+      if (u.includes('AIR_PM2_5')) return wfsZone('0-10 µg/m³');
+      if (u.includes('AIR_PM10')) return wfsZone('10-20 µg/m³');
+      if (u.includes('AIR_NO2')) return wfsZone('5-15 µg/m³');
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.modelledZone.pm25Range).toBe('0-10 µg/m³');
+    expect(result!.modelledZone.pm10Range).toBe('10-20 µg/m³');
+    expect(result!.modelledZone.no2Range).toBe('5-15 µg/m³');
+  });
+
+  it('returns null when monitor API fails', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'));
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no monitors in response', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors')) return { ok: true, json: async () => [] };
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result).toBeNull();
+  });
+
+  it('includes 24h averages in summary', async () => {
+    mockFetch.mockImplementation(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes('get-monitors'))
+        return makeMonitors({
+          latest_averages: { pm2_5: { value: 12 }, pm10: { value: 25 } },
+        });
+      return emptyWfs();
+    });
+    const { getAirQuality } = await import('../../../packages/db/src/queries/air-quality');
+    const result = await getAirQuality({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.avg24h.pm25).toBe(12);
+    expect(result!.avg24h.pm10).toBe(25);
+    expect(result!.summary).toContain('12 µg/m³');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Microclimate — mocked Met Éireann CSV response
+// ---------------------------------------------------------------------------
+
+describe('getMicroclimate (mocked)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  // 12 months × 2 years in the 1991–2020 window
+  // Cols: year,month,meant,maxtp,mintp,mnmax,mnmin,rain,gmin,wdsp,maxgt,sun
+  const SAMPLE_CSV = [
+    'Station: Test',
+    'Height: 71m',
+    'Year,Month,MeanT,MaxT,MinT,MnMax,MnMin,Rain,GMin,WdSp,MaxGt,Sun',
+    '2010,1,5.0,8.0,2.0,7.0,2.5,90,0.1,12.0,15.0,50',
+    '2010,2,5.5,8.5,2.5,7.5,3.0,75,0.5,11.0,14.0,65',
+    '2010,3,7.0,10.0,4.0,9.0,4.5,70,1.0,13.0,16.0,100',
+    '2010,4,9.0,12.5,5.5,11.0,6.0,55,2.0,11.5,14.5,140',
+    '2010,5,11.0,14.5,7.5,13.0,8.0,60,4.0,10.0,13.0,170',
+    '2010,6,13.5,17.0,10.0,15.5,10.5,65,6.0,9.5,12.0,160',
+    '2010,7,15.0,18.5,11.5,17.0,12.0,70,7.0,9.0,11.5,140',
+    '2010,8,14.5,18.0,11.0,16.5,11.5,80,6.5,10.0,13.0,130',
+    '2010,9,12.5,16.0,9.0,14.5,9.5,75,4.5,11.0,14.0,110',
+    '2010,10,9.5,13.0,6.0,11.5,7.0,85,2.5,12.5,15.5,90',
+    '2010,11,6.5,9.5,3.5,8.5,4.0,95,0.5,13.0,16.5,60',
+    '2010,12,4.5,7.5,1.5,6.5,2.0,100,0.0,14.0,17.0,45',
+    '2011,1,5.2,8.2,2.2,7.2,2.7,88,0.2,12.2,15.2,52',
+    '2011,2,5.7,8.7,2.7,7.7,3.2,73,0.6,11.2,14.2,67',
+    '2011,3,7.2,10.2,4.2,9.2,4.7,68,1.2,13.2,16.2,102',
+    '2011,4,9.2,12.7,5.7,11.2,6.2,53,2.2,11.7,14.7,142',
+    '2011,5,11.2,14.7,7.7,13.2,8.2,58,4.2,10.2,13.2,172',
+    '2011,6,13.7,17.2,10.2,15.7,10.7,63,6.2,9.7,12.2,162',
+    '2011,7,15.2,18.7,11.7,17.2,12.2,68,7.2,9.2,11.7,142',
+    '2011,8,14.7,18.2,11.2,16.7,11.7,78,6.7,10.2,13.2,132',
+    '2011,9,12.7,16.2,9.2,14.7,9.7,73,4.7,11.2,14.2,112',
+    '2011,10,9.7,13.2,6.2,11.7,7.2,83,2.7,12.7,15.7,92',
+    '2011,11,6.7,9.7,3.7,8.7,4.2,93,0.7,13.2,16.7,62',
+    '2011,12,4.7,7.7,1.7,6.7,2.2,98,0.2,14.2,17.2,47',
+  ].join('\n');
+
+  const csvResponse = () => ({ ok: true, text: async () => SAMPLE_CSV });
+
+  it('computes climate normals from CSV data', async () => {
+    mockFetch.mockResolvedValue(csvResponse());
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    const result = await getMicroclimate({ lat: 53.35, lng: -6.26 });
+
+    expect(result).not.toBeNull();
+    expect(result!.station.name).toBe('Phoenix Park');
+    expect(result!.normals.meanTemp).toBeGreaterThan(5);
+    expect(result!.normals.meanTemp).toBeLessThan(15);
+    expect(result!.normals.rainfall).toBeGreaterThan(500);
+    expect(result!.normals.sunHours).toBeGreaterThan(500);
+    expect(result!.normals.windSpeed).toBeGreaterThan(0);
+  });
+
+  it('estimates frost days from mean minimum temperatures', async () => {
+    mockFetch.mockResolvedValue(csvResponse());
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    const result = await getMicroclimate({ lat: 53.35, lng: -6.26 });
+
+    // CSV mnmin ranges from 2.0 to 12.2; months with mnmin ≤ 5 contribute frost days
+    expect(result!.normals.frostDays).toBeGreaterThan(0);
+    expect(result!.normals.frostDays).toBeLessThan(100);
+  });
+
+  it('includes national comparison percentages', async () => {
+    mockFetch.mockResolvedValue(csvResponse());
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    const result = await getMicroclimate({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.nationalComparison.tempVsNational).toMatch(/national average/);
+    expect(result!.nationalComparison.rainfallVsNational).toMatch(/national average/);
+  });
+
+  it('includes retrofit note and source attribution', async () => {
+    mockFetch.mockResolvedValue(csvResponse());
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    const result = await getMicroclimate({ lat: 53.35, lng: -6.26 });
+
+    expect(result!.retrofitNote.length).toBeGreaterThan(0);
+    expect(result!.context).toContain('Met Éireann');
+    expect(result!.context).toContain('CC BY 4.0');
+  });
+
+  it('returns null when CSV fetch fails', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'));
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    // Use Malin Head coords (station not yet in module cache)
+    const result = await getMicroclimate({ lat: 55.37, lng: -7.34 });
+
+    expect(result).toBeNull();
+  });
+
+  it('finds nearest station by haversine distance', async () => {
+    mockFetch.mockResolvedValue(csvResponse());
+    const { getMicroclimate } = await import('../../../packages/db/src/queries/microclimate');
+    // Cork coords — nearest should be Cork Airport or Roches Point
+    const result = await getMicroclimate({ lat: 51.9, lng: -8.47 });
+
+    expect(result).not.toBeNull();
+    expect(result!.station.distanceKm).toBeLessThan(20);
   });
 });
