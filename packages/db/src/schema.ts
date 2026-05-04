@@ -416,6 +416,58 @@ export interface TownMetric {
 }
 
 // -----------------------------------------------------------------------------
+// api_keys — B2B API key management with prepaid credits
+// -----------------------------------------------------------------------------
+
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    subscriberId: integer('subscriber_id'),
+    keyHash: varchar('key_hash', { length: 64 }).notNull(),
+    keyPrefix: varchar('key_prefix', { length: 16 }).notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    creditsRemaining: integer('credits_remaining').notNull().default(0),
+    creditsPurchased: integer('credits_purchased').notNull().default(0),
+    tier: varchar('tier', { length: 50 }).notNull().default('standard'),
+    rateLimitPerMinute: integer('rate_limit_per_minute').notNull().default(60),
+    isActive: boolean('is_active').notNull().default(true),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('api_keys_hash_idx').on(table.keyHash),
+    index('api_keys_subscriber_idx').on(table.subscriberId),
+    index('api_keys_active_idx').on(table.isActive),
+  ],
+);
+
+// -----------------------------------------------------------------------------
+// api_usage — per-request usage log for billing and analytics
+// -----------------------------------------------------------------------------
+
+export const apiUsage = pgTable(
+  'api_usage',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    apiKeyId: integer('api_key_id').notNull(),
+    endpoint: varchar('endpoint', { length: 200 }).notNull(),
+    requestParams: jsonb('request_params'),
+    creditsUsed: integer('credits_used').notNull().default(1),
+    responseStatus: integer('response_status').notNull(),
+    latencyMs: integer('latency_ms'),
+    ipAddress: varchar('ip_address', { length: 45 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('api_usage_key_idx').on(table.apiKeyId),
+    index('api_usage_created_idx').on(table.createdAt),
+    index('api_usage_key_created_idx').on(table.apiKeyId, table.createdAt),
+  ],
+);
+
+// -----------------------------------------------------------------------------
 // Schema exports for migrations and queries
 // -----------------------------------------------------------------------------
 
@@ -429,6 +481,8 @@ export const schema = {
   events,
   csoStats,
   rtbRents,
+  apiKeys,
+  apiUsage,
 };
 
 export type Town = typeof towns.$inferSelect;
@@ -442,3 +496,6 @@ export type NewPlanningApp = typeof planningApps.$inferInsert;
 export type GrantScheme = typeof grantSchemes.$inferSelect;
 export type Subscriber = typeof subscribers.$inferSelect;
 export type Event = typeof events.$inferSelect;
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;
+export type ApiUsage = typeof apiUsage.$inferSelect;
