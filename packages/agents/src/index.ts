@@ -179,9 +179,7 @@ export interface ComparableExcluded {
 }
 
 export interface ComparableAnalysisResult {
-  fair_value_low: number;
-  fair_value_high: number;
-  fair_value_central: number;
+  estimated_value: number;
   confidence: 'high' | 'medium' | 'low';
   comparables_used: ComparableUsed[];
   comparables_excluded: ComparableExcluded[];

@@ -18,9 +18,7 @@ interface ComparableUsed {
 }
 
 interface ComparableResult {
-  fair_value_low: number;
-  fair_value_high: number;
-  fair_value_central: number;
+  estimated_value: number;
   confidence: string;
   comparables_used: ComparableUsed[];
   narrative: string;
@@ -753,8 +751,8 @@ export default function AnalysePage() {
           {/* Executive summary strip */}
           <div style={S.execSummary}>
             <div style={S.execItem}>
-              <span style={S.execLabel}>Fair Value</span>
-              <span style={S.execValue}>{eur(result.comparable.fair_value_central)}</span>
+              <span style={S.execLabel}>Market Value</span>
+              <span style={S.execValue}>{eur(result.comparable.estimated_value)}</span>
               <span style={S.execSub}>{result.comparable.confidence} confidence</span>
             </div>
             <div style={S.execItem}>
@@ -833,20 +831,11 @@ export default function AnalysePage() {
                 <div>
                   <div style={S.dCardTitle}>Valuation</div>
                   <div style={S.dCardHeadline}>
-                    {eur(result.comparable.fair_value_low)} – {eur(result.comparable.fair_value_high)}
+                    {eur(result.comparable.estimated_value)}
                   </div>
                 </div>
                 <div style={{ ...S.confidenceBadge, background: result.comparable.confidence === 'high' ? '#dcfce7' : result.comparable.confidence === 'medium' ? '#fef9c3' : '#fee2e2', color: result.comparable.confidence === 'high' ? '#166534' : result.comparable.confidence === 'medium' ? '#854d0e' : '#991b1b' }}>
                   {result.comparable.confidence}
-                </div>
-              </div>
-              <div style={S.dCardBody}>
-                <div style={S.valBar}>
-                  <span style={S.valBarEnd}>{eur(result.comparable.fair_value_low)}</span>
-                  <div style={S.valBarFill}>
-                    <div style={S.valBarCenter}>{eur(result.comparable.fair_value_central)}</div>
-                  </div>
-                  <span style={S.valBarEnd}>{eur(result.comparable.fair_value_high)}</span>
                 </div>
               </div>
               <details style={S.expandable}>
@@ -1539,16 +1528,6 @@ const S: Record<string, React.CSSProperties> = {
     cursor: 'pointer', listStyle: 'none' as const,
   },
   expandContent: { padding: '0 1.25rem 1rem' },
-
-  // Valuation bar
-  valBar: {
-    display: 'flex', alignItems: 'center', gap: '0.5rem',
-    background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px',
-    padding: '0.5rem 0.75rem',
-  },
-  valBarEnd: { fontSize: '0.82rem', color: '#666', fontWeight: 500, whiteSpace: 'nowrap' as const },
-  valBarFill: { flex: 1, height: 6, background: 'linear-gradient(90deg, #bbf7d0, #16a34a)', borderRadius: 3, position: 'relative' as const, display: 'flex', justifyContent: 'center' },
-  valBarCenter: { position: 'absolute' as const, top: -20, fontSize: '0.85rem', fontWeight: 800, color: '#15803d' },
 
   // Effective cost breakdown
   effectiveCost: { fontSize: '0.85rem' },

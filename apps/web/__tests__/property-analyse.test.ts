@@ -85,9 +85,7 @@ const FIXTURE_CANDIDATES = [
 ];
 
 const FIXTURE_COMPARABLE_RESULT = {
-  fair_value_low: 290000,
-  fair_value_high: 320000,
-  fair_value_central: 305000,
+  estimated_value: 305000,
   confidence: 'medium' as const,
   comparables_used: [
     {
@@ -291,11 +289,8 @@ describe('POST /api/property/analyse', () => {
     const res = await POST(makeRequest(BASE_BODY));
     const json = await res.json();
 
-    expect(json.comparable.fair_value_low).toBeTypeOf('number');
-    expect(json.comparable.fair_value_high).toBeTypeOf('number');
-    expect(json.comparable.fair_value_central).toBeTypeOf('number');
-    expect(json.comparable.fair_value_low).toBeLessThanOrEqual(json.comparable.fair_value_central);
-    expect(json.comparable.fair_value_central).toBeLessThanOrEqual(json.comparable.fair_value_high);
+    expect(json.comparable.estimated_value).toBeTypeOf('number');
+    expect(json.comparable.estimated_value).toBeGreaterThan(0);
     expect(['high', 'medium', 'low']).toContain(json.comparable.confidence);
     expect(json.comparable.narrative).toBeTypeOf('string');
     expect(json.comparable.narrative.length).toBeGreaterThan(0);

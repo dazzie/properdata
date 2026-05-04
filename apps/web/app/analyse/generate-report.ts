@@ -15,9 +15,7 @@ interface ComparableUsed {
 }
 
 interface ComparableResult {
-  fair_value_low: number;
-  fair_value_high: number;
-  fair_value_central: number;
+  estimated_value: number;
   confidence: string;
   comparables_used: ComparableUsed[];
   narrative: string;
@@ -454,10 +452,10 @@ function computeScorecard(input: ReportInput): ScoreItem[] {
   const items: ScoreItem[] = [];
 
   // Value for money
-  if (result.comparable.fair_value_central) {
-    const ratio = purchasePrice / result.comparable.fair_value_central;
+  if (result.comparable.estimated_value) {
+    const ratio = purchasePrice / result.comparable.estimated_value;
     const vfm = Math.max(0, Math.min(100, Math.round((1 - (ratio - 1)) * 75)));
-    items.push({ dimension: 'Value for money', score: vfm, note: ratio <= 1 ? 'At or below fair value' : `${Math.round((ratio - 1) * 100)}% above fair value` });
+    items.push({ dimension: 'Value for money', score: vfm, note: ratio <= 1 ? 'At or below market value' : `${Math.round((ratio - 1) * 100)}% above market value` });
   }
 
   // Comparable confidence
@@ -660,8 +658,8 @@ export async function generateReport(input: ReportInput): Promise<void> {
   const costs = computeCanonicalCosts(input, grantCats);
   const hasVacantGrant = (result.grants.applicable_schemes ?? []).some((s) => s.code?.includes('CROI') || s.name?.toLowerCase().includes('vacant'));
 
-  const askVsFair = result.comparable.fair_value_central
-    ? ((purchasePrice - result.comparable.fair_value_central) / result.comparable.fair_value_central) * 100
+  const askVsEstimate = result.comparable.estimated_value
+    ? ((purchasePrice - result.comparable.estimated_value) / result.comparable.estimated_value) * 100
     : null;
 
   const summaryPoints: string[] = [];
@@ -669,10 +667,10 @@ export async function generateReport(input: ReportInput): Promise<void> {
   // Valuation
   const compsUsed = result.comparable.comparables_used ?? [];
   const distVerifiedCount = compsUsed.filter((c) => c.distance_meters != null).length;
-  let valNote = `Fair value estimate: ${eur(result.comparable.fair_value_central)} (${eur(result.comparable.fair_value_low)} - ${eur(result.comparable.fair_value_high)}).`;
-  if (askVsFair != null) {
-    const dir = askVsFair >= 0 ? 'above' : 'below';
-    valNote += ` Purchase price is ${Math.abs(Math.round(askVsFair))}% ${dir} central estimate.`;
+  let valNote = `Market value estimate: ${eur(result.comparable.estimated_value)}.`;
+  if (askVsEstimate != null) {
+    const dir = askVsEstimate >= 0 ? 'above' : 'below';
+    valNote += ` Purchase price is ${Math.abs(Math.round(askVsEstimate))}% ${dir} estimate.`;
   }
   valNote += ` Confidence: ${result.comparable.confidence} (${compsUsed.length} comparables identified${distVerifiedCount > 0 ? `, ${distVerifiedCount} distance-verified` : ', none distance-verified'}).`;
   summaryPoints.push(valNote);
@@ -819,21 +817,19 @@ export async function generateReport(input: ReportInput): Promise<void> {
   }
 
   // =========================================================================
-  // 4. Fair Value Range
+  // 4. Market Value Estimate
   // =========================================================================
 
-  heading('Fair Value Range', 4);
+  heading('Market Value Estimate', 4);
 
-  keyValue('Low estimate', eur(result.comparable.fair_value_low));
-  keyValue('Central estimate', eur(result.comparable.fair_value_central), BRAND.green);
-  keyValue('High estimate', eur(result.comparable.fair_value_high));
+  keyValue('Estimated value', eur(result.comparable.estimated_value), BRAND.green);
   keyValue('Confidence', result.comparable.confidence,
     result.comparable.confidence === 'high' ? GREEN_DARK : result.comparable.confidence === 'medium' ? AMBER : RED);
 
-  if (askVsFair != null) {
-    const dir = askVsFair >= 0 ? 'above' : 'below';
-    keyValue('Price vs fair value', `${Math.abs(Math.round(askVsFair))}% ${dir}`,
-      askVsFair > 10 ? AMBER : askVsFair < -10 ? GREEN_DARK : GREY.dark);
+  if (askVsEstimate != null) {
+    const dir = askVsEstimate >= 0 ? 'above' : 'below';
+    keyValue('Price vs estimate', `${Math.abs(Math.round(askVsEstimate))}% ${dir}`,
+      askVsEstimate > 10 ? AMBER : askVsEstimate < -10 ? GREEN_DARK : GREY.dark);
   }
   y += 2;
   body(sanitizeNarrative(result.comparable.narrative));
@@ -1160,11 +1156,11 @@ export async function generateReport(input: ReportInput): Promise<void> {
     const localCount = compsUsed.filter((c) => c.weight === 'high').length;
     flags.push({ flag: 'Low valuation confidence', severity: 'HIGH', detail: `${compsUsed.length} comparables identified, ${localCount > 0 ? `${localCount} genuine local references` : 'none are strong local matches'}, ${distVerifiedCount > 0 ? `${distVerifiedCount} distance-verified` : 'none distance-verified'}. Independent valuation recommended.` });
   }
-  if (askVsFair != null && askVsFair > 10) {
-    flags.push({ flag: 'Price above fair value', severity: 'MEDIUM', detail: `Price is ${Math.round(askVsFair)}% above central fair value. Consider condition, spec, or market timing.` });
+  if (askVsEstimate != null && askVsEstimate > 10) {
+    flags.push({ flag: 'Price above market value', severity: 'MEDIUM', detail: `Price is ${Math.round(askVsEstimate)}% above estimated market value. Consider condition, spec, or market timing.` });
   }
-  if (askVsFair != null && askVsFair < -20) {
-    flags.push({ flag: 'Price well below fair value', severity: 'MEDIUM', detail: `Price is ${Math.abs(Math.round(askVsFair))}% below fair value. Investigate condition, title, or vacancy.` });
+  if (askVsEstimate != null && askVsEstimate < -20) {
+    flags.push({ flag: 'Price well below market value', severity: 'MEDIUM', detail: `Price is ${Math.abs(Math.round(askVsEstimate))}% below market value. Investigate condition, title, or vacancy.` });
   }
 
   // Environmental flags
@@ -1295,7 +1291,7 @@ export async function generateReport(input: ReportInput): Promise<void> {
 
   const disclaimers = [
     'This report is generated by AI using verified public data sources including the Property Price Register (PPR), RTB Rent Index, SEAI BER database, EPA radon maps, EU PVGIS solar data, and OpenStreetMap.',
-    'Fair value estimates are based on comparable PPR sales within the local area. They are not a formal valuation and should not be treated as such. An independent RICS/SCSI valuation is recommended before purchase.',
+    'Market value estimates are based on comparable PPR sales within the local area. They are not a formal valuation and should not be treated as such. An independent RICS/SCSI valuation is recommended before purchase.',
     'Grant eligibility is estimated based on publicly available scheme rules. Actual eligibility is determined by the relevant scheme administrator (SEAI, local authority, Revenue) based on documentation submitted at application. Some grants shown may be mutually exclusive.',
     'Effective cost scenarios are illustrative. The conservative scenario assumes no grants. The base scenario uses a central grant estimate. Upside scenarios require confirmation of eligibility.',
     'Rental yield estimates use RTB Rent Index data (actual achieved rents, not asking rents). Actual yield depends on tenancy outcomes, expense levels, and individual tax circumstances.',
