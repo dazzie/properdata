@@ -307,6 +307,18 @@ describe('POST /api/property/analyse', () => {
     expect(json.grants.narrative).toBeTypeOf('string');
   });
 
+  it('computes stamp duty at 1% and reconciles effective cost', async () => {
+    const res = await POST(makeRequest(BASE_BODY));
+    const json = await res.json();
+    const nac = json.grants.net_acquisition_cost;
+
+    expect(nac.stamp_duty).toBe(Math.round(BASE_BODY.purchasePrice * 0.01));
+    expect(nac.purchase_price).toBe(BASE_BODY.purchasePrice);
+    expect(nac.effective_cost).toBe(
+      nac.purchase_price + nac.stamp_duty + nac.estimated_legal_fees - nac.total_grants_central,
+    );
+  });
+
   // -------------------------------------------------------------------------
   // Investor flow (all three agents)
   // -------------------------------------------------------------------------

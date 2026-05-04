@@ -39,10 +39,10 @@ For a given property + buyer context, output this exact JSON structure:
   ],
   "net_acquisition_cost": {
     "purchase_price": "number",
-    "total_grants_central": "number",
-    "stamp_duty": "number",
-    "estimated_legal_fees": "number",
-    "effective_cost": "number — purchase + stamp duty + fees − grants"
+    "total_grants_central": "number — midpoint of realistic grant total",
+    "stamp_duty": "number — use 1% of purchase price for residential (≤€1M); 1% on first €1M + 2% above for >€1M",
+    "estimated_legal_fees": "number — default €2,500 unless specified",
+    "effective_cost": "number — purchase + stamp duty + fees − total_grants_central"
   },
   "narrative": "string — 1-2 paragraphs explaining the headline number and key conditions"
 }
@@ -125,6 +125,14 @@ The narrative must include this disclaimer phrasing:
 > *Eligibility is determined by the relevant scheme administrator based on documentation submitted at application. This estimate reflects publicly available rules as of [DATE] and should be confirmed with [SEAI / your local authority / Revenue / etc.] before relying on it for a purchase decision.*
 
 This is not optional. Grant rules change frequently and we are not the scheme administrator.
+
+## Internal consistency rules
+
+- `total_grants_low` must equal the sum of `amount_low` for all applicable schemes with status `definite` or `probable`.
+- `total_grants_high` must equal the sum of `amount_high` for all applicable schemes (excluding `excluded` status), respecting stacking exclusions.
+- `total_grants_central` in `net_acquisition_cost` must be a realistic midpoint — not a simple average of low/high, but the amount a buyer would likely receive given probable eligibilities.
+- `effective_cost` must exactly equal `purchase_price + stamp_duty + estimated_legal_fees - total_grants_central`.
+- The `narrative` must not cite grant figures that contradict the JSON totals.
 
 ## What you do not do
 

@@ -226,8 +226,8 @@ interface CanonicalCosts {
 function computeCanonicalCosts(input: ReportInput, grantCats: GrantCategory[]): CanonicalCosts {
   const { purchasePrice, result } = input;
   const nac = result.grants.net_acquisition_cost;
-  const stampDuty = nac?.stamp_duty ?? Math.round(purchasePrice * 0.01);
-  const legalFees = nac?.estimated_legal_fees ?? 2500;
+  const stampDuty = nac.stamp_duty;
+  const legalFees = nac.estimated_legal_fees;
   const totalFees = stampDuty + legalFees;
   const conservativeCost = purchasePrice + totalFees;
 
@@ -637,6 +637,24 @@ export async function generateReport(input: ReportInput): Promise<void> {
   }
   y += 20;
 
+  // Preliminary report warning when key fields are missing
+  const missingKey = !propertyType || propertyType === 'unknown' || !berRating || !yearBuilt || !input.bedrooms;
+  if (missingKey) {
+    doc.setFillColor(255, 251, 235);
+    doc.setDrawColor(217, 119, 6);
+    doc.roundedRect(MARGIN, y, CONTENT_W, 14, 2, 2, 'FD');
+    y += 5;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(146, 64, 14);
+    doc.text('PRELIMINARY REPORT', MARGIN + 3, y);
+    y += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text('Key property attributes are unconfirmed. Valuation, grant and retrofit estimates are low-confidence until property type, bedrooms, BER and year built are verified.', MARGIN + 3, y, { maxWidth: CONTENT_W - 6 });
+    y += 10;
+  }
+
   // Location map
   if (location) {
     const mapImg = await renderStaticMap(location.lat, location.lng, 600, 200, 14);
@@ -667,10 +685,15 @@ export async function generateReport(input: ReportInput): Promise<void> {
   // Valuation
   const compsUsed = result.comparable.comparables_used ?? [];
   const distVerifiedCount = compsUsed.filter((c) => c.distance_meters != null).length;
-  let valNote = `Market value estimate: ${eur(result.comparable.estimated_value)}.`;
+  const isLowConf = result.comparable.confidence === 'low';
+  let valNote = isLowConf
+    ? `Indicative model estimate: ${eur(result.comparable.estimated_value)}, based on limited comparable data.`
+    : `Market value estimate: ${eur(result.comparable.estimated_value)}.`;
   if (askVsEstimate != null) {
     const dir = askVsEstimate >= 0 ? 'above' : 'below';
-    valNote += ` Purchase price is ${Math.abs(Math.round(askVsEstimate))}% ${dir} estimate.`;
+    valNote += isLowConf
+      ? ` The target price is ${Math.abs(Math.round(askVsEstimate))}% ${dir} this estimate, but confidence is low.`
+      : ` Purchase price is ${Math.abs(Math.round(askVsEstimate))}% ${dir} estimate.`;
   }
   valNote += ` Confidence: ${result.comparable.confidence} (${compsUsed.length} comparables identified${distVerifiedCount > 0 ? `, ${distVerifiedCount} distance-verified` : ', none distance-verified'}).`;
   summaryPoints.push(valNote);
@@ -701,7 +724,7 @@ export async function generateReport(input: ReportInput): Promise<void> {
       const zoneTypes = [...new Set(result.flood.zones.map((z) => z.source))].join('/');
       summaryPoints.push(`Flood risk: ${result.flood.riskCategory} — property is within ${zoneTypes} flood zone(s). ${result.flood.recommendation}`);
     } else {
-      summaryPoints.push('Flood risk: none identified — not within any OPW mapped flood zone.');
+      summaryPoints.push('Flood risk: no mapped OPW flood-zone intersection identified. This does not rule out local drainage, groundwater, or unmapped surface-water risk.');
     }
   } else {
     summaryPoints.push('Flood risk: not assessed (coordinates required). Verify on OPW flood maps before purchase.');
@@ -820,9 +843,9 @@ export async function generateReport(input: ReportInput): Promise<void> {
   // 4. Market Value Estimate
   // =========================================================================
 
-  heading('Market Value Estimate', 4);
+  heading(isLowConf ? 'Indicative Value Estimate' : 'Market Value Estimate', 4);
 
-  keyValue('Estimated value', eur(result.comparable.estimated_value), BRAND.green);
+  keyValue(isLowConf ? 'Indicative estimate' : 'Estimated value', eur(result.comparable.estimated_value), BRAND.green);
   keyValue('Confidence', result.comparable.confidence,
     result.comparable.confidence === 'high' ? GREEN_DARK : result.comparable.confidence === 'medium' ? AMBER : RED);
 
@@ -830,6 +853,10 @@ export async function generateReport(input: ReportInput): Promise<void> {
     const dir = askVsEstimate >= 0 ? 'above' : 'below';
     keyValue('Price vs estimate', `${Math.abs(Math.round(askVsEstimate))}% ${dir}`,
       askVsEstimate > 10 ? AMBER : askVsEstimate < -10 ? GREEN_DARK : GREY.dark);
+  }
+
+  if (isLowConf) {
+    body('This estimate is based on limited comparable data. Property type, bedrooms, floor area, condition and BER are unknown or unverified. Treat as indicative until these fields are confirmed.');
   }
   y += 2;
   body(sanitizeNarrative(result.comparable.narrative));
@@ -1290,15 +1317,16 @@ export async function generateReport(input: ReportInput): Promise<void> {
   heading('Assumptions & Disclaimers', 13);
 
   const disclaimers = [
-    'This report is generated by AI using verified public data sources including the Property Price Register (PPR), RTB Rent Index, SEAI BER database, EPA radon maps, EU PVGIS solar data, and OpenStreetMap.',
-    'Market value estimates are based on comparable PPR sales within the local area. They are not a formal valuation and should not be treated as such. An independent RICS/SCSI valuation is recommended before purchase.',
-    'Grant eligibility is estimated based on publicly available scheme rules. Actual eligibility is determined by the relevant scheme administrator (SEAI, local authority, Revenue) based on documentation submitted at application. Some grants shown may be mutually exclusive.',
+    'This report is an automated due-diligence aid generated from public and third-party datasets believed to be reliable, but not independently verified by ProperData. Data sources update at different intervals and may contain omissions, lags or errors.',
+    'Any market value estimate is an indicative model output based on available comparable PPR sales. It is not a Red Book valuation, SCSI valuation or professional valuation opinion. An independent RICS/SCSI valuation is recommended before purchase.',
+    'Grant estimates are indicative only. Eligibility and grant amounts are determined solely by the relevant scheme administrator (SEAI, Revenue, local authority). Some grants may be mutually exclusive or may require works to be completed by registered contractors.',
     'Effective cost scenarios are illustrative. The conservative scenario assumes no grants. The base scenario uses a central grant estimate. Upside scenarios require confirmation of eligibility.',
-    'Rental yield estimates use RTB Rent Index data (actual achieved rents, not asking rents). Actual yield depends on tenancy outcomes, expense levels, and individual tax circumstances.',
+    ...(result.yield ? ['Rental yield estimates use RTB Rent Index data (actual achieved rents, not asking rents). Actual yield depends on tenancy outcomes, expense levels, and individual tax circumstances.'] : []),
     'Radon risk data is from the EPA national radon survey. Individual property risk can only be determined by an in-home radon test.',
     'Solar potential is estimated using EU PVGIS satellite data for the approximate location. Actual generation depends on roof orientation, pitch, shading, and system specification.',
-    'This report does not constitute financial, legal, tax, or property advice. Consult a qualified professional before making property decisions.',
-    `Report generated on ${formatDate()} using data available at that time. Data sources update at different frequencies; some figures may not reflect the very latest changes.`,
+    'Amenity and walkability data derived from OpenStreetMap contributors. OpenStreetMap data is available under the Open Database Licence (ODbL). ProperData is not affiliated with or endorsed by the OpenStreetMap Foundation.',
+    'This report does not constitute financial, legal, tax, or property advice. It is not a substitute for solicitor, surveyor, valuer, tax adviser or estate agent advice. Users should independently verify all material facts before making a property decision.',
+    `Report generated on ${formatDate()} using data available at that time.`,
   ];
 
   doc.setFontSize(7.5);
@@ -1308,6 +1336,42 @@ export async function generateReport(input: ReportInput): Promise<void> {
     for (const line of lines) { checkPage(4); doc.text(line, MARGIN + 4, y); y += 3.5; }
     y += 1.5;
   }
+
+  // =========================================================================
+  // 14. Data Sources
+  // =========================================================================
+
+  heading('Data Sources', 14);
+
+  const sourceRows: string[][] = [
+    ['Comparable sales', 'Property Price Register (PPR)', 'psr.ie', 'Public statutory register'],
+    ['Stamp duty', 'Revenue Commissioners published rates', 'revenue.ie', 'Statutory'],
+  ];
+  if (result.yield) sourceRows.push(['Rent estimates', 'RTB Rent Index (CSO PxStat RIQ02)', 'cso.ie', 'Public dataset']);
+  if (result.radon) sourceRows.push(['Radon risk', 'EPA national radon survey', 'epa.ie', 'Public / INSPIRE']);
+  if (result.solar) sourceRows.push(['Solar potential', 'EU PVGIS (JRC)', 'ec.europa.eu/jrc', 'EU open data']);
+  if (result.walkability) sourceRows.push(['Walkability / amenities', 'OpenStreetMap', 'openstreetmap.org', 'ODbL']);
+  if (result.flood) sourceRows.push(['Flood risk', 'OPW CFRAM / NIFM', 'floodinfo.ie', 'Public / INSPIRE']);
+  if (result.noise) sourceRows.push(['Noise maps', 'EPA Strategic Noise Maps (Round 4)', 'gis.epa.ie', 'Public / INSPIRE']);
+  if (result.airQuality) sourceRows.push(['Air quality', 'EPA Air Quality Network', 'airquality.ie', 'Public']);
+  if (result.microclimate) sourceRows.push(['Microclimate', 'Met Éireann 30-year normals', 'met.ie', 'CC BY 4.0']);
+  sourceRows.push(['Grant schemes', 'SEAI, Revenue, local authorities', 'seai.ie / revenue.ie', 'Public scheme rules']);
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [['Data Item', 'Source', 'Reference', 'Licence / Basis']],
+    body: sourceRows,
+    styles: { fontSize: 7, cellPadding: 2 },
+    headStyles: { fillColor: BRAND.green, textColor: [255, 255, 255], fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [240, 253, 244] },
+  });
+  y = getLastTableY(doc) + 5;
+
+  doc.setFontSize(7);
+  doc.setTextColor(...GREY.mid);
+  doc.text(`All data accessed on or before ${formatDate()}.`, MARGIN, y);
+  y += 5;
 
   // Footer on every page
   const totalPages = doc.getNumberOfPages();

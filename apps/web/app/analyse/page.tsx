@@ -751,7 +751,7 @@ export default function AnalysePage() {
           {/* Executive summary strip */}
           <div style={S.execSummary}>
             <div style={S.execItem}>
-              <span style={S.execLabel}>Market Value</span>
+              <span style={S.execLabel}>{result.comparable.confidence === 'low' ? 'Indicative Value' : 'Market Value'}</span>
               <span style={S.execValue}>{eur(result.comparable.estimated_value)}</span>
               <span style={S.execSub}>{result.comparable.confidence} confidence</span>
             </div>
@@ -763,12 +763,7 @@ export default function AnalysePage() {
             {result.grants.net_acquisition_cost && (
               <div style={S.execItem}>
                 <span style={S.execLabel}>Effective Cost</span>
-                <span style={S.execValue}>{eur(
-                  Number(form.purchasePrice)
-                  + (result.grants.net_acquisition_cost.stamp_duty ?? Math.round(Number(form.purchasePrice) * 0.01))
-                  + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 2500)
-                  - (result.grants.net_acquisition_cost.total_grants_central ?? 0)
-                )}</span>
+                <span style={S.execValue}>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
                 <span style={S.execSub}>after grants + fees</span>
               </div>
             )}
@@ -838,6 +833,11 @@ export default function AnalysePage() {
                   {result.comparable.confidence}
                 </div>
               </div>
+              {result.comparable.confidence === 'low' && (
+                <div style={{ padding: '0.5rem 1.25rem', fontSize: '0.8rem', color: '#92400e', background: '#fffbeb', borderTop: '1px solid #fde68a' }}>
+                  Indicative estimate only — based on limited comparable data. Not a formal valuation.
+                </div>
+              )}
               <details style={S.expandable}>
                 <summary style={S.expandSummary}>View {result.comparable.comparables_used?.length ?? 0} comparables and analysis</summary>
                 <div style={S.expandContent}>
@@ -899,12 +899,7 @@ export default function AnalysePage() {
                       <span>Grants (est.)</span><span>-{eur(result.grants.net_acquisition_cost.total_grants_central)}</span>
                     </div>
                     <div style={{ ...S.costRow, fontWeight: 700, borderTop: '2px solid #e5e5e5', paddingTop: '0.375rem', marginTop: '0.25rem' }}>
-                      <span>Effective cost</span><span>{eur(
-                        (result.grants.net_acquisition_cost.purchase_price ?? Number(form.purchasePrice))
-                        + (result.grants.net_acquisition_cost.stamp_duty ?? 0)
-                        + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 0)
-                        - (result.grants.net_acquisition_cost.total_grants_central ?? 0)
-                      )}</span>
+                      <span>Effective cost</span><span>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
                     </div>
                   </div>
                 )}

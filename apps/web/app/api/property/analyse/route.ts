@@ -136,6 +136,13 @@ function validateRequest(body: unknown): AnalyseRequest {
 // Sonnet input cost ~$3/MTok, output ~$15/MTok. Each agent call ~2K in + ~2K out.
 const ESTIMATED_COST_PER_AGENT_CALL = 0.036;
 
+const LEGAL_FEES_DEFAULT = 2500;
+
+function computeStampDuty(purchasePrice: number): number {
+  if (purchasePrice <= 1_000_000) return Math.round(purchasePrice * 0.01);
+  return Math.round(10_000 + (purchasePrice - 1_000_000) * 0.02);
+}
+
 export async function POST(request: NextRequest) {
   const start = Date.now();
 
@@ -289,6 +296,17 @@ export async function POST(request: NextRequest) {
     ]);
 
     const agentCalls = yieldResult ? 3 : 2;
+
+    const stampDuty = computeStampDuty(req.purchasePrice);
+    const legalFees = grantResult.net_acquisition_cost?.estimated_legal_fees ?? LEGAL_FEES_DEFAULT;
+    const centralGrants = grantResult.net_acquisition_cost?.total_grants_central ?? 0;
+    grantResult.net_acquisition_cost = {
+      purchase_price: req.purchasePrice,
+      stamp_duty: stampDuty,
+      estimated_legal_fees: legalFees,
+      total_grants_central: centralGrants,
+      effective_cost: req.purchasePrice + stampDuty + legalFees - centralGrants,
+    };
 
     const response: AnalyseResponse = {
       comparable: comparableResult,
