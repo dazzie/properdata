@@ -701,11 +701,11 @@ export async function generateReport(input: ReportInput): Promise<void> {
   // Grants
   if (grantCats.length > 0) {
     const parts = grantCats.map((c) => `${c.label}: up to ${eur(c.totalHigh)}`);
-    summaryPoints.push(`Grant opportunity: ${parts.join('; ')}. Total identified: up to ${eur(costs.grantTotalHigh)}.`);
+    summaryPoints.push(`Grant opportunity: confirmed ${eur(result.grants.total_grants_low)}, realistic estimate ${eur(costs.centralGrantEstimate)}, theoretical maximum ${eur(costs.grantTotalHigh)} (${parts.join('; ')}).`);
   }
 
   // Effective cost — canonical calculation
-  summaryPoints.push(`Base effective acquisition cost: ${eur(costs.baseCost)} (${eur(purchasePrice)} + ${eur(costs.stampDuty)} stamp duty + ${eur(costs.legalFees)} legal fees - ${eur(costs.centralGrantEstimate)} central grant estimate).`);
+  summaryPoints.push(`Base effective acquisition cost: ${eur(costs.baseCost)} (${eur(purchasePrice)} + ${eur(costs.stampDuty)} stamp duty + ${eur(costs.legalFees)} legal fees - ${eur(costs.centralGrantEstimate)} realistic grant estimate).`);
   if (costs.croiHigh > 0) {
     summaryPoints.push(`Additional upside: Croi Conaithe may provide up to ${eur(costs.croiHigh)} if vacancy or dereliction criteria are met; not included in base scenario.`);
   }
@@ -899,6 +899,14 @@ export async function generateReport(input: ReportInput): Promise<void> {
   // =========================================================================
 
   heading('Grant Opportunity', 6);
+
+  // Three-tier grant summary
+  subheading('Grant Estimate Summary');
+  keyValue('Confirmed (definite eligibility)', eur(result.grants.total_grants_low));
+  keyValue('Realistic estimate', eur(costs.centralGrantEstimate), GREEN_DARK);
+  keyValue('Theoretical maximum', eur(costs.grantTotalHigh));
+  body('Confirmed = schemes where eligibility is definite based on inputs provided. Realistic = probable and definite schemes combined. Theoretical maximum = all identified schemes if every assumption resolves favourably. Some schemes are mutually exclusive.');
+  y += 2;
 
   // Category summary
   if (grantCats.length > 0) {

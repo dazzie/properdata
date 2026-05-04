@@ -756,9 +756,9 @@ export default function AnalysePage() {
               <span style={S.execSub}>{result.comparable.confidence} confidence</span>
             </div>
             <div style={S.execItem}>
-              <span style={S.execLabel}>Grant Upside</span>
-              <span style={{ ...S.execValue, color: '#16a34a' }}>{eur(result.grants.total_grants_high)}</span>
-              <span style={S.execSub}>{result.grants.applicable_schemes?.length ?? 0} schemes</span>
+              <span style={S.execLabel}>Grant Estimate</span>
+              <span style={{ ...S.execValue, color: '#16a34a' }}>{eur(result.grants.net_acquisition_cost?.total_grants_central ?? 0)}</span>
+              <span style={S.execSub}>{result.grants.applicable_schemes?.length ?? 0} schemes identified</span>
             </div>
             {result.grants.net_acquisition_cost && (
               <div style={S.execItem}>
@@ -879,7 +879,7 @@ export default function AnalysePage() {
                 <div>
                   <div style={S.dCardTitle}>Grant Opportunity</div>
                   <div style={{ ...S.dCardHeadline, color: '#16a34a' }}>
-                    {eur(result.grants.total_grants_low)} – {eur(result.grants.total_grants_high)}
+                    {eur(result.grants.net_acquisition_cost?.total_grants_central ?? 0)}
                   </div>
                 </div>
                 <div style={{ ...S.confidenceBadge, background: '#dcfce7', color: '#166534' }}>
@@ -887,8 +887,19 @@ export default function AnalysePage() {
                 </div>
               </div>
               <div style={S.dCardBody}>
+                <div style={S.effectiveCost}>
+                  <div style={{ ...S.costRow, fontSize: '0.78rem', color: '#666' }}>
+                    <span>Confirmed (definite eligibility)</span><span style={{ color: '#16a34a' }}>{eur(result.grants.total_grants_low)}</span>
+                  </div>
+                  <div style={{ ...S.costRow, fontSize: '0.78rem', color: '#666' }}>
+                    <span>Realistic estimate</span><span style={{ color: '#16a34a', fontWeight: 600 }}>{eur(result.grants.net_acquisition_cost?.total_grants_central ?? 0)}</span>
+                  </div>
+                  <div style={{ ...S.costRow, fontSize: '0.78rem', color: '#666' }}>
+                    <span>Theoretical maximum</span><span style={{ color: '#16a34a' }}>{eur(result.grants.total_grants_high)}</span>
+                  </div>
+                </div>
                 {result.grants.net_acquisition_cost && (
-                  <div style={S.effectiveCost}>
+                  <div style={{ ...S.effectiveCost, marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #e5e5e5' }}>
                     <div style={S.costRow}>
                       <span>Purchase price</span><span>{eur(result.grants.net_acquisition_cost.purchase_price)}</span>
                     </div>
@@ -896,7 +907,7 @@ export default function AnalysePage() {
                       <span>Stamp duty + legal</span><span>{eur((result.grants.net_acquisition_cost.stamp_duty ?? 0) + (result.grants.net_acquisition_cost.estimated_legal_fees ?? 0))}</span>
                     </div>
                     <div style={{ ...S.costRow, color: '#16a34a' }}>
-                      <span>Grants (est.)</span><span>-{eur(result.grants.net_acquisition_cost.total_grants_central)}</span>
+                      <span>Grants (realistic est.)</span><span>-{eur(result.grants.net_acquisition_cost.total_grants_central)}</span>
                     </div>
                     <div style={{ ...S.costRow, fontWeight: 700, borderTop: '2px solid #e5e5e5', paddingTop: '0.375rem', marginTop: '0.25rem' }}>
                       <span>Effective cost</span><span>{eur(result.grants.net_acquisition_cost.effective_cost)}</span>
