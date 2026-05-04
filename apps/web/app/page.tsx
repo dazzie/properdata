@@ -25,6 +25,9 @@ export default function HomePage() {
       </section>
 
       <div style={{ marginTop: '2rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+        <a href="/search" style={{ color: '#1D9E75', textDecoration: 'underline' }}>
+          Search sold properties
+        </a>
         <a href="/analyse" style={{ color: '#1D9E75', textDecoration: 'underline' }}>
           Analyse a property
         </a>

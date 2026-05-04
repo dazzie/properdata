@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect, lazy, Suspense, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 const PropertyMap = lazy(() => import('./PropertyMap'));
 
@@ -322,25 +323,26 @@ function walkabilityColor(score: number): string {
 // ---------------------------------------------------------------------------
 
 export default function AnalysePage() {
+  const urlParams = useSearchParams();
   const [form, setForm] = useState({
-    address: '',
-    county: 'Westmeath',
-    propertyType: 'semi_detached',
-    bedrooms: '3',
-    purchasePrice: '310000',
-    berRating: 'D2',
-    yearBuilt: '',
-    lat: '',
-    lng: '',
-    buyerType: 'former_owner_occupier',
-    intendedUse: 'owner_occupier',
+    address: urlParams.get('address') ?? '',
+    county: urlParams.get('county') || 'Westmeath',
+    propertyType: urlParams.get('propertyType') || 'semi_detached',
+    bedrooms: urlParams.get('bedrooms') || '3',
+    purchasePrice: urlParams.get('purchasePrice') || '310000',
+    berRating: urlParams.get('berRating') || 'D2',
+    yearBuilt: urlParams.get('yearBuilt') ?? '',
+    lat: urlParams.get('lat') ?? '',
+    lng: urlParams.get('lng') ?? '',
+    buyerType: urlParams.get('buyerType') || 'former_owner_occupier',
+    intendedUse: urlParams.get('intendedUse') || 'owner_occupier',
   });
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyseResponse | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(urlParams.get('address') ?? '');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);

@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSQL } from '../db';
 
+const SORT_MAP: Record<string, string> = {
+  date_desc: 'sale_date DESC',
+  date_asc: 'sale_date ASC',
+  price_desc: 'price DESC',
+  price_asc: 'price ASC',
+};
+
 export async function GET(request: NextRequest) {
   const sql = getSQL();
   const params = request.nextUrl.searchParams;
@@ -14,6 +21,8 @@ export async function GET(request: NextRequest) {
   const addressSearch = params.get('address_search');
   const isNew = params.get('is_new');
   const limitParam = params.get('limit');
+  const offsetParam = params.get('offset');
+  const sortParam = params.get('sort');
 
   const conditions: string[] = [];
   const args: unknown[] = [];
@@ -50,7 +59,9 @@ export async function GET(request: NextRequest) {
     idx++;
   }
   if (addressSearch) {
-    conditions.push(`(address_normalised ILIKE $${idx} OR address_raw ILIKE $${idx})`);
+    conditions.push(
+      `(address_normalised ILIKE $${idx} OR (address_normalised IS NULL AND address_raw ILIKE $${idx}))`,
+    );
     args.push(`%${addressSearch}%`);
     idx++;
   }
@@ -62,6 +73,8 @@ export async function GET(request: NextRequest) {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = Math.min(Number(limitParam) || 50, 200);
+  const offset = Math.max(Number(offsetParam) || 0, 0);
+  const orderBy = SORT_MAP[sortParam ?? ''] ?? SORT_MAP.date_desc;
 
   const query = `
     SELECT id, sale_date, price, address_raw, address_normalised, county, eircode,
@@ -70,8 +83,9 @@ export async function GET(request: NextRequest) {
            ST_X(location::geometry) AS lng
     FROM sales
     ${where}
-    ORDER BY sale_date DESC
+    ORDER BY ${orderBy}
     LIMIT ${limit}
+    OFFSET ${offset}
   `;
 
   try {
@@ -81,7 +95,7 @@ export async function GET(request: NextRequest) {
     const countResult = await sql(countQuery, args);
     const total = Number(countResult[0]?.total ?? 0);
 
-    return NextResponse.json({ rows, total, limit });
+    return NextResponse.json({ rows, total, limit, offset });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
